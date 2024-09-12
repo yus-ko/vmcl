@@ -79,7 +79,6 @@ vector<cv::Point3f> camera_point_p, camera_point_c; //特徴点定義
 
 sensor_msgs::CameraInfo camera_info;                //CameraInfo受け取り用
 geometry_msgs::Twist robot_velocity;                //指令速度
-geometry_msgs::Twist velocity;                      //制御速度
 
 int kaisu = 0, kaisuM1 = 0, kaisuV1 = 0;
 
@@ -2224,7 +2223,7 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 	if(X_25==false&&TH_90==false&&Y_05==false)
 	{
 		robot_velocity.linear.x  = VX+2.2*(Des_RobotX-Act_RobotX)+2.2*(Des_RobotY-Act_RobotY);//実行指令値
-		velocity.angular.z=(Des_RobotTH-Act_RobotTH)*2.2;
+		robot_velocity.angular.z=(Des_RobotTH-Act_RobotTH)*2.2;
 		pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
 		if(Act_RobotV<=0.001)
 		{
@@ -2237,14 +2236,14 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 		//robot_velocity.linear.x  = VX;
 		//std::cout <<"11"<< std::endl;
 
-		velocity.angular.z = 0.0;
+		robot_velocity.angular.z = 0.0;
 		if(Act_RobotV<=0.001&&Act_RobotX>LX)	//停止命令
 		{
 			//std::cout <<"2"<< std::endl;
 
 			X_25=true;
 			robot_velocity.linear.x  = 0.0; // 並進速度vの初期化
-			velocity.angular.z = 0.0; // 回転速度ωの初期化
+			robot_velocity.angular.z = 0.0; // 回転速度ωの初期化
 			pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
 			usleep(7*100000);//0.5秒ストップ(マイクロ秒)
 		}
@@ -2252,17 +2251,17 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 	else if(X_25==true&&TH_90==false&&Y_05==false)	//回転動作
 	{
 		robot_velocity.linear.x  =  0;
-		velocity.angular.z  =  THZ+(Des_RobotTH-Act_RobotTH)*2.2;//実行指令値
+		robot_velocity.angular.z  =  THZ+(Des_RobotTH-Act_RobotTH)*2.2;//実行指令値
 		pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
 		robot_velocity.linear.x  =  0.0;
-		velocity.angular.z  =  THZ; 
+		robot_velocity.angular.z  =  THZ; 
 		if(abs(encoder_odometry_.twist.twist.angular.z)<=0.05)
 		{
-			velocity.angular.z  =  0;	//指令値の遅れを考慮(推定に使用する指令値)
+			robot_velocity.angular.z  =  0;	//指令値の遅れを考慮(推定に使用する指令値)
 		}
 		else
 		{
-			velocity.angular.z  =  THZ;
+			robot_velocity.angular.z  =  THZ;
 		} 
 		//velocity.angular.z  =  THZ; 
 		//std::cout <<"初期設定"<< std::endl;
@@ -2274,7 +2273,7 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 			//std::cout <<"4"<< std::endl;
 			TH_90=true;
 			robot_velocity.linear.x  = 0.0; // 並進速度vの初期化
-			velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
+			robot_velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
 			pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
 			usleep(7*100000);//0.5秒ストップ(マイクロ秒)
 		}
@@ -2284,7 +2283,7 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 	else if(X_25==true&&TH_90==true&&Y_05==false)	//直進
 	{
 		robot_velocity.linear.x  = VX+2.2*(Des_RobotX-Act_RobotX)+2.2*(Des_RobotY-Act_RobotY);
-		velocity.angular.z=(Des_RobotTH-Act_RobotTH)*2.2;
+		robot_velocity.angular.z=(Des_RobotTH-Act_RobotTH)*2.2;
 		
 
 		pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
@@ -2298,13 +2297,13 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 			robot_velocity.linear.x  = VX;	// 並進速度vの初期化
 		} 
 		//robot_velocity.linear.x  = VX; // 並進速度vの初期化
-		velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
+		robot_velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
 		//std::cout <<"5"<< std::endl;
 		if(Act_RobotV<=0.001&&Act_RobotY>LY)
 		{
 			Y_05=true;
 			robot_velocity.linear.x  = 0.0; // 並進速度vの初期化
-			velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
+			robot_velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
 			pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
 			usleep(7*100000);//0.5秒ストップ(マイクロ秒)
 			//std::cout <<"6"<< std::endl;
@@ -2313,7 +2312,7 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 	else if(X_25==true&&TH_90==true&&Y_05==true)
 	{
 		robot_velocity.linear.x  = 0.0; // 並進速度vの初期化
-		velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
+		robot_velocity.angular.z = 0.0; // 回転速度ωの初期化}//xが1以上になったら終了
 		pub.publish(robot_velocity);    // 速度指令メッセージをパブリッシュ（送信）
 	}
 	Act_RobotV = encoder_odometry_.twist.twist.linear.x+encoder_odometry_.twist.twist.linear.y;//速度ベクトルの合成
@@ -2321,8 +2320,14 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 
 	Des_RobotV=robot_velocity.linear.x+robot_velocity.linear.y;//速度ベクトルの合成
 	//std::cout << "Des_RobotV=" <<Des_RobotV<< std::endl;
-	std::random_device see;
-	std::mt19937 engin(see());
+	std::vector<std::vector<double>> noise_param = {
+		{0,5.46e-6},	//直進で生じる道のり
+		{0,1.13e-6},	//回転で生じる道のり
+		{0,1.72e-6},
+		{0,3.15e-6}
+		};
+	static std::vector<std::vector<double>> noise_(noise_param.size());
+
 	//この下にカルマンフィルタを実装する(できたら別関数にしたい)
 	//カルマンフィルタ初期設定
 	if(kaisu==0)
@@ -2338,30 +2343,21 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 		//z = cv::Mat_<double>::zeros(2, 1);//センサーの観測値(仮)
 		std::random_device seed;
 		std::mt19937 engine(seed());
-		//ノイズ小
-		//std::normal_distribution<> dist1(0,5.46e-5);//直進で生じる道のり
-		std::normal_distribution<> dist1(0,5.46e-3);//0405条件緩和
-		std::normal_distribution<> dist2(0,1.13e-3);//0405条件緩和
-		
-		//ノイズ大
-		//std::normal_distribution<> dist1(0,1.64e-2);//直進で生じる道のり
-		//std::normal_distribution<> dist2(0,3.39e-2);//回転で生じる道のり
-		std::normal_distribution<> dist3(0,1.72e-1);//0405条件緩和
-		std::normal_distribution<> dist4(0,3.15e-2);//0405条件緩和
-		std::normal_distribution<> dist5(0,0.25);//パーティクル初期位置設定x座標分散値
-		std::normal_distribution<> dist6(0,0.25);//パーティクル初期位置設定y座標分散値
-		std::normal_distribution<> dist7(0,0.05236);//パーティクル初期位置設定姿勢分散値
-		for(int y = 0; y < pnum; y++)
+		std::vector<std::normal_distribution<>> dists(noise_param.size());
+		for (size_t i = 0; i < noise_param.size(); i++)
 		{
-			any[y][0]=dist1(engine);
-			any[y][1]=dist2(engine);
-			any[y][2]=dist3(engine);
-			any[y][3]=dist4(engine);
-			any[y][4]=dist5(engine);
-			any[y][5]=dist6(engine);
-			any[y][6]=dist7(engine);
+			std::normal_distribution<> dist(noise_param[i][0],noise_param[i][1]);
+			dists[i] = dist;
 		}
-		//std::cout <<"ノイズ"<< dist4(engine) << std::endl;
+		
+		for (size_t i = 0; i < noise_.size(); i++)
+		{
+			for (size_t j = 0; j < pnum; j++)
+			{
+				noise_[i].push_back(dists[i](engine));
+			}
+		}
+
 		std::cout <<"初期設定"<< std::endl;
 	}
 	
@@ -2371,14 +2367,33 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 		{
 			//目標値(Des)にノイズを入れることで擬似的に実効値(Act)を作り出している
 
-			//breez[i]=robot_velocity.linear.x+any[i][0]*sqrt(abs(robot_velocity.linear.x)/realsec)+any[i][1]*sqrt(abs(velocity.angular.z)/realsec);//ノイズ付き速度(山口先輩)
-			//greed[i]=velocity.angular.z+any[i][2]*sqrt(abs(robot_velocity.linear.x)/realsec)+any[i][3]*sqrt(abs(velocity.angular.z)/realsec);//ノイズ付き角速度（山口先輩）
+			// breez[i]=robot_velocity.linear.x+noise_[0][i]*sqrt(abs(robot_velocity.linear.x)/realsec)+noise_[1][i]*sqrt(abs(robot_velocity.angular.z)/realsec);//ノイズ付き速度(山口先輩)
+			// greed[i]=robot_velocity.angular.z+noise_[2][i]*sqrt(abs(robot_velocity.linear.x)/realsec)+noise_[3][i]*sqrt(abs(robot_velocity.angular.z)/realsec);//ノイズ付き角速度（山口先輩）
 			//std::cout << "greed[i]" <<greed[i]<< std::endl;
 			
-			breez[i]=Act_RobotV+any[i][0]*sqrt(abs(Act_RobotV)/realsec)+any[i][1]*sqrt(abs(encoder_odometry_.twist.twist.angular.z)/realsec);//ノイズ付き速度(エンコーダ基準)（鈴木先輩）
-			greed[i]=encoder_odometry_.twist.twist.angular.z+any[i][2]*sqrt(abs(Act_RobotV)/realsec)+any[i][3]*sqrt(abs(encoder_odometry_.twist.twist.angular.z)/realsec);//ノイズ付き角速度（鈴木先輩）
+			breez[i]=Act_RobotV+noise_[0][i]*sqrt(abs(Act_RobotV)/realsec)+noise_[1][i]*sqrt(abs(encoder_odometry_.twist.twist.angular.z)/realsec);//ノイズ付き速度(エンコーダ基準)（鈴木先輩）
+			greed[i]=encoder_odometry_.twist.twist.angular.z+noise_[2][i]*sqrt(abs(Act_RobotV)/realsec)+noise_[3][i]*sqrt(abs(encoder_odometry_.twist.twist.angular.z)/realsec);//ノイズ付き角速度（鈴木先輩）
 
-			ROS_INFO("%d, %f, %f", i, breez[i], greed[i]);
+			// ROS_INFO("%d, %f, %f", i, breez[i], greed[i]);
+		}
+
+		double breez_min = *min_element(begin(breez), end(breez));
+		double breez_max = *max_element(begin(breez), end(breez));
+		double greed_min = *min_element(begin(greed), end(greed));
+		double greed_max = *max_element(begin(greed), end(greed));
+
+		// double any_min = *min_element(begin(any), end(any));
+		// double any_max = *max_element(begin(any), end(any));
+
+		ROS_INFO("linear, min:%f, max:%f", breez_min, breez_max);
+		ROS_INFO("angular, min:%f, max:%f", greed_min, greed_max);
+
+		ROS_INFO("noise");
+		for (int i = 0; i < noise_.size(); i++) 
+		{
+			double noise_min = *min_element(begin(noise_[i]), end(noise_[i]));
+			double noise_max = *max_element(begin(noise_[i]), end(noise_[i]));
+			ROS_INFO("	%d, min:%f, max:%f", i, noise_min, noise_max);
 		}
 
 		//ロボットの状態方程式
@@ -2447,17 +2462,17 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 		if(Act_RobotX>0||Act_RobotY>0||Act_RobotTH>0)//ラグの調整
 		{
 			////目標指令状態
-			if(velocity.angular.z==0)
+			if(robot_velocity.angular.z==0)
 			{
 				Des_RobotX=Des_RobotX+(Des_RobotV*cos(Des_RobotTH)*realsec);
 				Des_RobotY=Des_RobotY+(Des_RobotV*sin(Des_RobotTH)*realsec);
-				Des_RobotTH=Des_RobotTH+(velocity.angular.z*realsec);
+				Des_RobotTH=Des_RobotTH+(robot_velocity.angular.z*realsec);
 			}
 			else
 			{
-				Des_RobotX=Des_RobotX+((Des_RobotV/velocity.angular.z)*(sin(Des_RobotTH+velocity.angular.z*realsec)-sin(Des_RobotTH)));
-				Des_RobotY=Des_RobotY+((Des_RobotV/velocity.angular.z)*(-cos(Des_RobotTH+velocity.angular.z*realsec)+cos(Des_RobotTH)));
-				Des_RobotTH=Des_RobotTH+(velocity.angular.z*realsec);
+				Des_RobotX=Des_RobotX+((Des_RobotV/robot_velocity.angular.z)*(sin(Des_RobotTH+robot_velocity.angular.z*realsec)-sin(Des_RobotTH)));
+				Des_RobotY=Des_RobotY+((Des_RobotV/robot_velocity.angular.z)*(-cos(Des_RobotTH+robot_velocity.angular.z*realsec)+cos(Des_RobotTH)));
+				Des_RobotTH=Des_RobotTH+(robot_velocity.angular.z*realsec);
 			}
 			//std::cout << "velocity.angular.z=" <<velocity.angular.z<< std::endl;
 			//std::cout << "Des_RobotX=" <<Des_RobotX<< std::endl;
@@ -2642,7 +2657,7 @@ void callback(const nav_msgs::Odometry::ConstPtr& msg,const sensor_msgs::Image::
 	}//if(time0 != false)→end; //プログラム初回時カルマンは実行しない(Δtがないから)
 
 	robot_velocity.linear.x  = 0.0; // 並進速度の初期化
-	velocity.angular.z = 0.0; // 回転速度の初期化
+	robot_velocity.angular.z = 0.0; // 回転速度の初期化
 
 	// 画面表示
 	// img_dst ARマーカー検出
