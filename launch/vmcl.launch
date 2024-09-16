@@ -1,0 +1,30 @@
+<launch>
+   <arg name="use_rviz"                default="true"/>
+   <arg name="topic_cmd"               default="cmd_vel"/>
+   <arg name="topic_odom"              default="/robot1/odom"/>
+   <arg name="topic_rgb"               default="/camera/color/image_raw"/>
+   <arg name="topic_depth"             default="/camera/aligned_depth_to_color/image_raw"/>
+   <arg name="file_rviz"               default="$(find vmcl)/rviz/show_particles.rviz"/>
+   <arg name="file_marker_pose"        default="$(find vmcl)/config/aruco_marker.yaml"/>
+
+   <node pkg="vmcl"  name="vmcl" type="vmcl" output="screen">
+      <rosparam file="$(arg file_marker_pose)" command="load" />
+      <remap from="odom"               to="$(arg topic_odom)"/>
+      <remap from="color/image_raw"    to="$(arg topic_rgb)"/>
+      <remap from="depth/image_raw"    to="$(arg topic_depth)"/>
+
+      <param name="norm_noise_mean_linear_linear"        value="0.0"/>
+      <param name="norm_noise_variance_linear_linear"    value="0.0005"/>
+      <param name="norm_noise_mean_linear_angular"       value="0.0"/>
+      <param name="norm_noise_variance_linear_angular"   value="0.0005"/>
+      <param name="norm_noise_mean_angular_linear"       value="0.0"/>
+      <param name="norm_noise_variance_angular_linear"   value="0.001"/>
+      <param name="norm_noise_mean_angular_angular"      value="0.0"/>
+      <param name="norm_noise_variance_angular_angular"  value="0.005"/>
+   </node>
+
+   <group if="$(arg use_rviz)">
+      <node pkg="rviz" type="rviz" name="rviz_vmcl" required="true" args="-d $(arg file_rviz)"/>
+   </group>
+
+</launch>
