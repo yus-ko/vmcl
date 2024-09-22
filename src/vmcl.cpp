@@ -1,526 +1,547 @@
-//特徴点検出のテストプログラム
-#ifndef _CRT_SECURE_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
-#include <ros/ros.h>
-#include <iostream>
-#include <string>
-#include <vector>
-#include <math.h>
-#include <opencv2/opencv.hpp>
-#include <opencv/highgui.h>
-#include <cv_bridge/cv_bridge.h>         //画像変換のヘッダ
-#include <sensor_msgs/Image.h>           //センサーデータ形式ヘッダ
-#include <sensor_msgs/image_encodings.h> //エンコードのためのヘッダ
-#include <sensor_msgs/CameraInfo.h>      //camera_infoを獲得するためのヘッダー
-#include <message_filters/subscriber.h>
-#include <message_filters/synchronizer.h>
-#include <message_filters/sync_policies/approximate_time.h>
-#include <random>
-#include <geometry_msgs/PoseStamped.h> //tf
-#include <tf2/convert.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#include <opencv2/aruco/charuco.hpp> //マーカー検出
-#include <nav_msgs/Path.h>           //経路情報を記録する
-
-#include <geometry_msgs/Twist.h> //ロボットの指令値(速度)用ヘッダー
-#include <nav_msgs/Odometry.h>
-#include <geometry_msgs/PoseArray.h>
-
-#include <potbot_lib/utility_ros.h>
+#include <vmcl/vmcl.h>
 
 using namespace std;
 using namespace cv;
 
-struct Marker
+namespace vmcl
 {
-	int id = 0;
-	potbot_lib::Pose pose;
-};
-
-class VMCLNode
-{
-	private:
-
-		std::string source_frame = "map"; //mapフレーム
-		std::string frame_id_camera = "camera_link"; //mapフレーム
-
-		ros::NodeHandle nh_sub_;
-		ros::Subscriber sub_odom_;
-		message_filters::Subscriber<sensor_msgs::Image> sub_rgb_;
-		message_filters::Subscriber<sensor_msgs::Image> sub_depth_;
-		ros::Publisher pub_estimate_odometry_, pub_particles_, pub_odometry_, pub_observed_marker_;
-
-		geometry_msgs::Twist velocity_command_;                //指令速度
-
-		double particle_num_=100;//パーティクル個数
-
-		std::vector<potbot_lib::Pose> particles_;	//パーティクルの位置
-		std::vector<double> particle_weight_;//各パーティクルに対する重み
-		std::vector<std::vector<double>> noise_;
-		std::vector<std::vector<double>> noise_params_;
-
-		std::vector<double> breez_;//ノイズ付きパーティクル速度
-		std::vector<double> greed_;//ノイズ付きパーティクル
-
-		std::vector<Marker> markers_truth_; //マーカーの世界座標
-
-		// ApproximateTimeポリシーの定義
-		typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image> MySyncPolicy;
-		
-		// 同期器の定義
-		boost::shared_ptr<message_filters::Synchronizer<MySyncPolicy>> sync_;
-
-		nav_msgs::Odometry encoder_odometry_;
-
-		void imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg,const sensor_msgs::Image::ConstPtr& depth_msg);
-		void odomCallback(const nav_msgs::Odometry::ConstPtr& msg);
-
-		bool getMarkerCoords(cv::Mat img_src, cv::Mat img_depth, std::vector<Marker> markers);
-		void initParticles();
-		void updateParticles();
-
-	public:
-		VMCLNode(/* args */);
-		~VMCLNode();
-};
-
-VMCLNode::VMCLNode(/* args */)
-{
-	ros::NodeHandle pnh("~");
-	XmlRpc::XmlRpcValue markers;
-	pnh.getParam("markers", markers);
-	for (size_t i = 0; i < markers.size(); i++)
+	VMCLNode::VMCLNode(tf2_ros::Buffer* tf)
 	{
-		std::string frame_id = static_cast<std::string>(markers[i]["frame_id"]);
+		tf_buffer_ = tf;
+
+		ros::NodeHandle pnh("~");
+
+		double m_vv=0, v_vv=0;
+		double m_vw=0, v_vw=0;
+		double m_wv=0, v_wv=0;
+		double m_ww=0, v_ww=0;
+
+		pnh.getParam("norm_noise_mean_linear_linear", m_vv);
+		pnh.getParam("norm_noise_variance_linear_linear", v_vv);
+		pnh.getParam("norm_noise_mean_linear_angular", m_vw);
+		pnh.getParam("norm_noise_variance_linear_angular", v_vw);
+		pnh.getParam("norm_noise_mean_angular_linear", m_wv);
+		pnh.getParam("norm_noise_variance_angular_linear", v_wv);
+		pnh.getParam("norm_noise_mean_angular_angular", m_ww);
+		pnh.getParam("norm_noise_variance_angular_angular", v_ww);
+
+		noise_params_ = {
+			{m_vv,v_vv},	//直進で生じる道のり
+			{m_vw,v_vw},	//回転で生じる道のり
+			{m_wv,v_wv},
+			{m_ww,v_ww}
+		};
+		
+		//Realsensesの時(roslaunch realsense2_camera rs_camera.launch align_depth:=true)(Depth修正版なのでこっちを使うこと)
+		sub_odom_ = nh_sub_.subscribe("odom", 1, &VMCLNode::odomCallback, this);
+		sub_rgb_.subscribe(nh_sub_, "color/image_raw", 1);//センサーメッセージを使うときは対応したヘッダーが必要
+		sub_depth_.subscribe(nh_sub_, "depth/image_raw", 1);
+
+		sync_.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10), sub_rgb_, sub_depth_));
+		sync_->registerCallback(boost::bind(&VMCLNode::imageCallback, this, _1, _2));
+
+		ros::NodeHandle nhPub;
+		pub_estimate_odometry_ = nhPub.advertise<nav_msgs::Odometry>("estimate_odometry",1000);
+		pub_particles_ = nhPub.advertise<geometry_msgs::PoseArray>("particles_posearray",1000);
+		pub_odometry_ = nhPub.advertise<nav_msgs::Odometry>("debug/encoder_odometry",1000);
+		pub_observed_marker_ = nhPub.advertise<visualization_msgs::MarkerArray>("debug/observed_marker",1000);
+
+		//2024-07-31廊下(直進11.0m,速度0.25)直線動作実験
+		//rosbag play 2024-07-31-13-10-22.bag//実測値(X:11.400,Y:3.262)
+		//rosbag play 2024-07-31-13-34-34.bag//実測値(X:11.050,Y:3.110)
+		// LX=11.0,VX=0.25,omegaZ=1.0,THZ=0.20,LY=3.00;
+
+		initParticles();
+
+	}
+
+	VMCLNode::~VMCLNode()
+	{
+	}
+
+	Marker VMCLNode::getMarkerTruth(int id)
+	{
+		geometry_msgs::PoseStamped marker_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, source_frame_, "marker_" + std::to_string(id));
+
 		Marker marker;
-		marker.id = static_cast<int>(markers[i]["id"]);
-		marker.pose.position.x = static_cast<double>(markers[i]["pose"]["x"]);
-		marker.pose.position.y = static_cast<double>(markers[i]["pose"]["y"]);
-		marker.pose.position.z = static_cast<double>(markers[i]["pose"]["z"]);
-		marker.pose.rotation.x = static_cast<double>(markers[i]["pose"]["roll"]);
-		marker.pose.rotation.y = static_cast<double>(markers[i]["pose"]["pitch"]);
-		marker.pose.rotation.z = static_cast<double>(markers[i]["pose"]["yaw"]);
+		marker.id = id;
+		marker.frame_id = source_frame_;
 
-		markers_truth_.push_back(marker);
+		marker.pose.position.x = marker_msg.pose.position.x;
+		marker.pose.position.y = marker_msg.pose.position.y;
+		marker.pose.position.z = marker_msg.pose.position.z;
+
+		double roll,pitch,yaw;
+		potbot_lib::utility::get_rpy(marker_msg.pose.orientation,roll,pitch,yaw);
+		marker.pose.rotation.x = roll;
+		marker.pose.rotation.y = pitch;
+		marker.pose.rotation.z = yaw;
+
+		return marker;
 	}
 
-	double m_vv=0, v_vv=0;
-	double m_vw=0, v_vw=0;
-	double m_wv=0, v_wv=0;
-	double m_ww=0, v_ww=0;
+	// センサ座標系での位置と姿勢を取得する関数（仮定）
+	Eigen::Affine3d getSensorPose(const potbot_lib::Pose& p) {
+		Eigen::Affine3d sensor_pose = Eigen::Affine3d::Identity();
+		
+		// センサ座標系での位置 (例: [0.5, 0.5, 0.5])
+		sensor_pose.translation() << p.position.x, p.position.y, p.position.z;
 
-	pnh.getParam("norm_noise_mean_linear_linear", m_vv);
-	pnh.getParam("norm_noise_variance_linear_linear", v_vv);
-	pnh.getParam("norm_noise_mean_linear_angular", m_vw);
-	pnh.getParam("norm_noise_variance_linear_angular", v_vw);
-	pnh.getParam("norm_noise_mean_angular_linear", m_wv);
-	pnh.getParam("norm_noise_variance_angular_linear", v_wv);
-	pnh.getParam("norm_noise_mean_angular_angular", m_ww);
-	pnh.getParam("norm_noise_variance_angular_angular", v_ww);
+		// センサ座標系での姿勢 (例: Roll=0, Pitch=0, Yaw=0) -> 単位クォータニオン
+		// Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
+		// q = Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
+		// 	Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
+		// 	Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ());
+		// sensor_pose.linear() = q.toRotationMatrix();
 
-	noise_params_ = {
-		{m_vv,v_vv},	//直進で生じる道のり
-		{m_vw,v_vw},	//回転で生じる道のり
-		{m_wv,v_wv},
-		{m_ww,v_ww}
-	};
-	
-	//Realsensesの時(roslaunch realsense2_camera rs_camera.launch align_depth:=true)(Depth修正版なのでこっちを使うこと)
-	sub_odom_ = nh_sub_.subscribe("odom", 1, &VMCLNode::odomCallback, this);
-	sub_rgb_.subscribe(nh_sub_, "color/image_raw", 1);//センサーメッセージを使うときは対応したヘッダーが必要
-	sub_depth_.subscribe(nh_sub_, "depth/image_raw", 1);
-
-	sync_.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10), sub_rgb_, sub_depth_));
-	sync_->registerCallback(boost::bind(&VMCLNode::imageCallback, this, _1, _2));
-
-	ros::NodeHandle nhPub;
-	pub_estimate_odometry_ = nhPub.advertise<nav_msgs::Odometry>("estimate_odometry",1000);
-	pub_particles_ = nhPub.advertise<geometry_msgs::PoseArray>("particles_posearray",1000);
-	pub_odometry_ = nhPub.advertise<nav_msgs::Odometry>("debug/encoder_odometry",1000);
-	pub_observed_marker_ = nhPub.advertise<visualization_msgs::MarkerArray>("debug/observed_marker",1000);
-
-	//2024-07-31廊下(直進11.0m,速度0.25)直線動作実験
-	//rosbag play 2024-07-31-13-10-22.bag//実測値(X:11.400,Y:3.262)
-	//rosbag play 2024-07-31-13-34-34.bag//実測値(X:11.050,Y:3.110)
-	// LX=11.0,VX=0.25,omegaZ=1.0,THZ=0.20,LY=3.00;
-
-	initParticles();
-}
-
-VMCLNode::~VMCLNode()
-{
-}
-
-void VMCLNode::imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg,const sensor_msgs::Image::ConstPtr& depth_msg)
-{	
-	
-	cv_bridge::CvImagePtr bridgeImage;//クラス::型//cv_brigeは画像変換するとこ
-	cv_bridge::CvImagePtr bridgedepthImage;//クラス::型//cv_brigeは画像変換するとこ
-	cv::Mat RGBimage,depthimage,image;
-	
-	try
-	{//MAT形式変換
-		bridgeImage=cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);//MAT形式に変える
-		//ROS_INFO("callBack");//printと秒数表示
-	}
-	catch(cv_bridge::Exception& e) //エラー処理
-	{//エラー処理(失敗)成功ならスキップ
-		std::cout<<"depth_image_callback Error \n";
-		ROS_ERROR("Could not convert from '%s' to 'BGR8'.",rgb_msg->encoding.c_str());
-		return ;
+		sensor_pose.rotate(Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
+			Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
+			Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ()));
+		
+		return sensor_pose;
 	}
 
-	try
-	{//MAT形式変換
-		bridgedepthImage=cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);//MAT形式に変える
-		//ROS_INFO("callBack");
-	}//printと秒数表示
-	catch(cv_bridge::Exception& e) //エラー処理
-	{//エラー処理(失敗)成功ならスキップ
-		std::cout<<"depth_image_callback Error \n";
-		ROS_ERROR("Could not convert from '%s' to '32FC1'.",depth_msg->encoding.c_str());
-		return;
+	// 世界座標系での点の位置と姿勢の真値を取得する関数（仮定）
+	Eigen::Affine3d getWorldPose(const potbot_lib::Pose& p) {
+		Eigen::Affine3d world_pose = Eigen::Affine3d::Identity();
+		
+		// 世界座標系での位置 (例: [1.0, 2.0, 3.0])
+		world_pose.translation() << p.position.x, p.position.y, p.position.z;
+
+		// 世界座標系での姿勢 (例: 45度回転)
+		Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
+		// q = Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
+		// 	Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
+		// 	Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ());
+		// world_pose.linear() = q.toRotationMatrix();
+
+		world_pose.rotate(Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
+			Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
+			Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ()));
+		
+		return world_pose;
 	}
 
-	std::vector<Marker> observed_markers;
-	cv::Mat img_src = bridgeImage->image.clone();//image変数に変換した画像データを代入  生の画像
-	cv::Mat img_depth = bridgedepthImage->image.clone();//image変数に変換した画像データを代入
-	getMarkerCoords(img_src, img_depth, observed_markers);
-
-	// for (const auto& p:particles_) ROS_INFO("%f, %f, %f", p.position.x, p.position.y, p.rotation.z);
-	// ROS_INFO("%f, %f, %f", particles_[0].position.x, particles_[0].position.y, particles_[0].rotation.z);
-	updateParticles();
-
-	double xsum=0,ysum=0,thsum=0;
-	for (const auto& p:particles_)
-	{
-		xsum+=p.position.x;
-		ysum+=p.position.y;
-		thsum+=p.rotation.z;
-	}
-	
-	double xhat = xsum/particles_.size();
-	double yhat = ysum/particles_.size();
-	double thhat = thsum/particles_.size();
-	
-	nav_msgs::Odometry estimate_odometry;
-	estimate_odometry.header.frame_id = source_frame;
-	estimate_odometry.header.stamp = ros::Time::now();
-	estimate_odometry.pose.pose = potbot_lib::utility::get_pose(xhat, yhat, 0, 0, 0, thhat);
-	pub_estimate_odometry_.publish(estimate_odometry);
-	
-	std::vector<double> ss;//重みのリスト
-
-	//(最大尤度と合計尤度)また最大尤度を取るパーティクル番号とその座標を表示させるプログラム(山口追記)※一応
-	double totalLikelihood = 0.0; //パーティクル群の尤度の総和
-	double maxLikelihood = 0.0;
-	int maxLikelihoodParticleIdx = 0; //最大尤度を持つパーティクル識別番号
-
-	for(int i = 0; i < particle_weight_.size(); i++)
-	{
-		if(i == 0)
-		{
-			maxLikelihood = particle_weight_[i];
-			maxLikelihoodParticleIdx = 0;
+	void VMCLNode::imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg,const sensor_msgs::Image::ConstPtr& depth_msg)
+	{	
+		cv_bridge::CvImagePtr bridgeImage;//クラス::型//cv_brigeは画像変換するとこ
+		cv_bridge::CvImagePtr bridgedepthImage;//クラス::型//cv_brigeは画像変換するとこ
+		cv::Mat RGBimage,depthimage,image;
+		
+		try
+		{//MAT形式変換
+			bridgeImage=cv_bridge::toCvCopy(rgb_msg, sensor_msgs::image_encodings::BGR8);//MAT形式に変える
+			//ROS_INFO("callBack");//printと秒数表示
 		}
-		else if (maxLikelihood < particle_weight_[i])
-		{
-			maxLikelihood = particle_weight_[i];
-			maxLikelihoodParticleIdx = i;
+		catch(cv_bridge::Exception& e) //エラー処理
+		{//エラー処理(失敗)成功ならスキップ
+			std::cout<<"depth_image_callback Error \n";
+			ROS_ERROR("Could not convert from '%s' to 'BGR8'.",rgb_msg->encoding.c_str());
+			return ;
 		}
-		totalLikelihood += particle_weight_[i];
-	}
-	//追加システム(最大尤度と合計尤度、重みの正規化と自己位置推定)終了
 
-	//リサンプリング
-	std::vector<double> sd;//重みの累積和
-	double sum=0;
+		try
+		{//MAT形式変換
+			bridgedepthImage=cv_bridge::toCvCopy(depth_msg, sensor_msgs::image_encodings::TYPE_32FC1);//MAT形式に変える
+			//ROS_INFO("callBack");
+		}//printと秒数表示
+		catch(cv_bridge::Exception& e) //エラー処理
+		{//エラー処理(失敗)成功ならスキップ
+			std::cout<<"depth_image_callback Error \n";
+			ROS_ERROR("Could not convert from '%s' to '32FC1'.",depth_msg->encoding.c_str());
+			return;
+		}
 
-	for (int i = 0; i < particle_num_; i++)
-	{
-		if (particle_weight_[i] < 1e-100)
+		std::vector<Marker> observed_markers;
+		cv::Mat img_src = bridgeImage->image.clone();//image変数に変換した画像データを代入  生の画像
+		cv::Mat img_depth = bridgedepthImage->image.clone();//image変数に変換した画像データを代入
+		getMarkerCoords(img_src, img_depth, observed_markers);
+
+		// if (!observed_markers.empty()) potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(observed_markers.front().pose));
+
+		Eigen::Affine3d sensor_to_world;
+		for (const auto& marker:observed_markers)
 		{
-			particle_weight_[i] = particle_weight_[i] + 1e-100;
+			// 世界座標系での真値の位置と姿勢
+			Eigen::Affine3d world_pose = getWorldPose(getMarkerTruth(marker.id).pose);
+			
+			// センサ座標系での位置と姿勢
+			Eigen::Affine3d sensor_pose = getSensorPose(marker.pose);
+
+			// センサ座標系から世界座標系への変換を計算
+			sensor_to_world = world_pose * sensor_pose.inverse();
+			
+			// 結果の出力（センサの世界座標系での位置と姿勢）
+			// std::cout << "Sensor position in world frame: \n" 
+			// 		<< sensor_to_world.translation() << std::endl;
+
+			// std::cout << "Sensor orientation in world frame (as rotation matrix): \n" 
+			// 		<< sensor_to_world.rotation() << std::endl;
 		}
 		
-		ss.push_back(particle_weight_[i]);
-	}
-	
-	for (int i = 0; i <particle_num_ ; i++)
-	{
-		sum+=ss[i];
-		sd.push_back(sum);
-		//std::cout << "sd=" <<sd[i]<< std::endl;
-	}//累積和　sd={1,3,6,10,15}
-	//std::cout << "sum=" <<sum<< std::endl;
 
-	double step=sd[particle_num_-1]/particle_num_;//(重みの合計)/(パーティクルの合計)
+		// for (const auto& p:particles_) ROS_INFO("%f, %f, %f", p.position.x, p.position.y, p.rotation.z);
+		// ROS_INFO("%f, %f, %f", particles_[0].position.x, particles_[0].position.y, particles_[0].rotation.z);
+		updateParticles();
 
-	std::random_device rd;
-	std::default_random_engine eng(rd());
-	std::uniform_real_distribution<double> distr(0,step);
-	double r=distr(eng);//0~stepの間でランダムな値を抽出する関数(おそらく小数付き)
-	//std::cout << "r=" <<r<< std::endl;
-
-	int cur_pos=0;
-	int math=0;
-	std::vector<potbot_lib::Pose> ps;//新たに抽出するパーティクルのリスト
-
-	while (ps.size() < particle_num_)//もとのパーティクル数と一致するまで
-	{
-		if (r < sd[cur_pos])//重みが幅より大きい場合
+		double xsum=0,ysum=0,thsum=0;
+		for (const auto& p:particles_)
 		{
-			ps.push_back(particles_[cur_pos]);
-			r+=step;
+			xsum+=p.position.x;
+			ysum+=p.position.y;
+			thsum+=p.rotation.z;
 		}
-		else
+		
+		double xhat = xsum/particles_.size();
+		double yhat = ysum/particles_.size();
+		double thhat = thsum/particles_.size();
+		
+		nav_msgs::Odometry estimate_odometry;
+		estimate_odometry.header.frame_id = source_frame_;
+		estimate_odometry.header.stamp = ros::Time::now();
+		// estimate_odometry.pose.pose = potbot_lib::utility::get_pose(xhat, yhat, 0, 0, 0, thhat);
+		estimate_odometry.pose.pose = potbot_lib::utility::get_pose(sensor_to_world);
+		pub_estimate_odometry_.publish(estimate_odometry);
+		
+		std::vector<double> ss;//重みのリスト
+
+		//(最大尤度と合計尤度)また最大尤度を取るパーティクル番号とその座標を表示させるプログラム(山口追記)※一応
+		double totalLikelihood = 0.0; //パーティクル群の尤度の総和
+		double maxLikelihood = 0.0;
+		int maxLikelihoodParticleIdx = 0; //最大尤度を持つパーティクル識別番号
+
+		for(int i = 0; i < particle_weight_.size(); i++)
 		{
-			cur_pos+=1;
-		}
-	}
-	//作り上げたpsの配列をもとのパーティクルの配列にコピーする処理
-	copy(ps.begin(),ps.end(),particles_.begin());
-	
-	for (int i = 0; i < particle_num_; i++)
-	{
-		particle_weight_.at(i)=1/particle_num_;
-	}
-	//リサンプリング（終わり）
-
-	geometry_msgs::PoseArray particles_msg;
-	particles_msg.header.stamp = ros::Time::now();//追加
-	particles_msg.header.frame_id = source_frame;//追加
-	for(const auto& p:particles_) particles_msg.poses.push_back(potbot_lib::utility::get_pose(p));
-	pub_particles_.publish(particles_msg);
-
-}
-
-void VMCLNode::odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
-{
-	encoder_odometry_ = *msg;
-	encoder_odometry_.header.stamp = ros::Time::now();
-	static tf2_ros::TransformBroadcaster dynamic_br;
-
-	potbot_lib::utility::broadcast_frame(dynamic_br, source_frame, encoder_odometry_.header.frame_id, potbot_lib::utility::get_pose());
-
-	geometry_msgs::Pose camera_pose = encoder_odometry_.pose.pose;
-	camera_pose.position.x += 0.13;
-	camera_pose.position.z += 0.31;
-	potbot_lib::utility::broadcast_frame(dynamic_br, encoder_odometry_.header.frame_id, frame_id_camera, camera_pose);
-
-	for (const auto& m:markers_truth_)
-	{
-		std::string frame_id = "marker_" + std::to_string(m.id);
-		geometry_msgs::Pose pose = potbot_lib::utility::get_pose(m.pose);
-		potbot_lib::utility::broadcast_frame(dynamic_br, source_frame, frame_id, pose);
-	}
-
-	pub_odometry_.publish(encoder_odometry_);
-}
-
-bool VMCLNode::getMarkerCoords(cv::Mat img_src, cv::Mat img_depth, std::vector<Marker> markers)
-{
-	markers.clear();
-	cv::Mat img_dst;	//arucoマーカー検出
-	img_src.copyTo(img_dst);
-	cv::Mat_<float> intrinsic_K= cv::Mat_<float>(3, 3);
-
-	//マーカー検出+外部パラメータ推定
-	//カメラ内部パラメータ読み込み
-	cv::Mat cameraMatrix;
-	cv::FileStorage fs;
-	fs.open("/home/ros/realsense_para.xml", cv::FileStorage::READ);
-	fs["intrinsic"]>>cameraMatrix;
-	//std::cout << "内部パラメータcameraMatrix=\n" << cameraMatrix << std::endl;
-	intrinsic_K=cameraMatrix;
-
-	//カメラの歪みパラメータ読み込み
-	cv::Mat distCoeffs;
-	cv::FileStorage fd;
-	fd.open("/home/ros/realsense_para.xml", cv::FileStorage::READ);
-	fd["distortion"]>>distCoeffs;
-	//std::cout << "ねじれパラメータdistCoeffs=\n" << distCoeffs << std::endl;
-
-	//マーカ辞書作成 6x6マスのマーカを250種類生成
-	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_250);
-
-	//charucoボード生成 10x7マスのチェスボード、グリッドのサイズ0.04f、グリッド内マーカのサイズ0.02f
-	cv::Ptr<cv::aruco::CharucoBoard> board = cv::aruco::CharucoBoard::create(10, 7, 0.04f, 0.02f, dictionary);
-
-	//マーカー検出時メソッドを指定
-	cv::Ptr<cv::aruco::DetectorParameters> params = cv::aruco::DetectorParameters::create();
-
-	std::vector<int> markerIds;
-	std::vector<std::vector<cv::Point2f> > markerCorners;
-	cv::aruco::detectMarkers(img_src, board->dictionary, markerCorners, markerIds, params);
-
-	std::vector<cv::Vec3d> rvecs,tvecs;//マーカーの姿勢(回転ベクトル、並進ベクトル)
-	cv::Mat_<double> rvecs2[50],jacobian[50];
-
-	//マーカー観測可能
-	if (markerIds.size() > 0) 
-	{
-		cv::aruco::drawDetectedMarkers(img_dst, markerCorners, markerIds);//マーカー位置を描画
-		//cv::aruco::drawDetectedMarkers(img_tate, markerCorners, markerIds);//マーカー位置を描画
-		cv::aruco::estimatePoseSingleMarkers(markerCorners, 0.05, cameraMatrix, distCoeffs, rvecs, tvecs);//マーカーの姿勢推定
-
-		for(int i=0;i<markerIds.size();i++)
-		{
-			// ROS_INFO_STREAM("markerIds("<<i<<")="<< markerIds.at(i));//マーカーID
-			int id = markerIds.at(i);
-			const auto& corners = markerCorners[i];
-			float mcx = (corners[0].x+corners[1].x)/2;//マーカー中心座標(x座標)
-			float mcy = (corners[0].y+corners[2].y)/2;//マーカー中心座標(y座標)
-			cv::circle(img_dst, cv::Point(mcx,mcy), 3, Scalar(0,255,0),  -1, cv::LINE_AA);//緑点
-			cv::aruco::drawAxis(img_dst,cameraMatrix,distCoeffs,rvecs[i], tvecs[i], 0.1);//マーカーの姿勢描写
-			cv::Rodrigues(rvecs[i],rvecs2[i],jacobian[i]);//回転ベクトルから回転行列への変換
-
-			//画像→カメラ座標変換(マーカーの中心座標を使用)
-			float depth = img_depth.at<float>(cv::Point(mcx,mcy))+100;
-
-			//Depthが取得できないコーナーを削除する+Depthの外れ値を除く
-			if(depth>0&&depth<10000)
+			if(i == 0)
 			{
-				double x = (mcx - 324.473) / 615.337;//ここで正規化座標もしてる
-				double y = (mcy - 241.696) / 615.458;
+				maxLikelihood = particle_weight_[i];
+				maxLikelihoodParticleIdx = 0;
+			}
+			else if (maxLikelihood < particle_weight_[i])
+			{
+				maxLikelihood = particle_weight_[i];
+				maxLikelihoodParticleIdx = i;
+			}
+			totalLikelihood += particle_weight_[i];
+		}
+		//追加システム(最大尤度と合計尤度、重みの正規化と自己位置推定)終了
 
-				//camera_info.K[0]=615.337,camera_info.K[2]=324.473,camera_info.K[4]=615.458,camera_info.K[5]=241.696//内部パラメータ
-				//324.473:画像横サイズ（半分）、241.696:画像サイズ（半分）、615.337:焦点距離、615.458:焦点距離
+		//リサンプリング
+		std::vector<double> sd;//重みの累積和
+		double sum=0;
 
-				Marker m;
-				m.id = id;
-				m.pose.position.x = depth/1000;
-				m.pose.position.y = -depth * x/1000;
-				m.pose.position.z = depth * y/1000;
-				markers.push_back(m);
+		for (int i = 0; i < particle_num_; i++)
+		{
+			if (particle_weight_[i] < 1e-100)
+			{
+				particle_weight_[i] = particle_weight_[i] + 1e-100;
+			}
+			
+			ss.push_back(particle_weight_[i]);
+		}
+		
+		for (int i = 0; i <particle_num_ ; i++)
+		{
+			sum+=ss[i];
+			sd.push_back(sum);
+			//std::cout << "sd=" <<sd[i]<< std::endl;
+		}//累積和　sd={1,3,6,10,15}
+		//std::cout << "sum=" <<sum<< std::endl;
 
-				// ROS_INFO("%d, %f, %f, %f", id, m.pose.position.x, m.pose.position.y, m.pose.position.z);
+		double step=sd[particle_num_-1]/particle_num_;//(重みの合計)/(パーティクルの合計)
 
+		std::random_device rd;
+		std::default_random_engine eng(rd());
+		std::uniform_real_distribution<double> distr(0,step);
+		double r=distr(eng);//0~stepの間でランダムな値を抽出する関数(おそらく小数付き)
+		//std::cout << "r=" <<r<< std::endl;
+
+		int cur_pos=0;
+		int math=0;
+		std::vector<potbot_lib::Pose> ps;//新たに抽出するパーティクルのリスト
+
+		while (ps.size() < particle_num_)//もとのパーティクル数と一致するまで
+		{
+			if (r < sd[cur_pos])//重みが幅より大きい場合
+			{
+				ps.push_back(particles_[cur_pos]);
+				r+=step;
+			}
+			else
+			{
+				cur_pos+=1;
+			}
+		}
+		//作り上げたpsの配列をもとのパーティクルの配列にコピーする処理
+		copy(ps.begin(),ps.end(),particles_.begin());
+		
+		for (int i = 0; i < particle_num_; i++)
+		{
+			particle_weight_.at(i)=1/particle_num_;
+		}
+		//リサンプリング（終わり）
+
+		geometry_msgs::PoseArray particles_msg;
+		particles_msg.header.stamp = ros::Time::now();//追加
+		particles_msg.header.frame_id = source_frame_;//追加
+		for(const auto& p:particles_) particles_msg.poses.push_back(potbot_lib::utility::get_pose(p));
+		pub_particles_.publish(particles_msg);
+
+	}
+
+	void VMCLNode::odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
+	{
+		encoder_odometry_ = *msg;
+		encoder_odometry_.header.stamp = ros::Time::now();
+		static tf2_ros::TransformBroadcaster dynamic_br;
+
+		potbot_lib::utility::broadcast_frame(dynamic_br, source_frame_, encoder_odometry_.header.frame_id, potbot_lib::utility::get_pose());
+		potbot_lib::utility::broadcast_frame(dynamic_br, encoder_odometry_.header.frame_id, encoder_odometry_.child_frame_id, encoder_odometry_.pose.pose);
+
+		pub_odometry_.publish(encoder_odometry_);
+	}
+
+	bool VMCLNode::getMarkerCoords(cv::Mat img_src, cv::Mat img_depth, std::vector<Marker>& markers)
+	{
+		markers.clear();
+		cv::Mat img_dst;	//arucoマーカー検出
+		img_src.copyTo(img_dst);
+		cv::Mat_<float> intrinsic_K= cv::Mat_<float>(3, 3);
+
+		//マーカー検出+外部パラメータ推定
+		//カメラ内部パラメータ読み込み
+		cv::Mat cameraMatrix;
+		cv::FileStorage fs;
+		fs.open("/home/ros/realsense_para.xml", cv::FileStorage::READ);
+		fs["intrinsic"]>>cameraMatrix;
+		//std::cout << "内部パラメータcameraMatrix=\n" << cameraMatrix << std::endl;
+		intrinsic_K=cameraMatrix;
+
+		//カメラの歪みパラメータ読み込み
+		cv::Mat distCoeffs;
+		cv::FileStorage fd;
+		fd.open("/home/ros/realsense_para.xml", cv::FileStorage::READ);
+		fd["distortion"]>>distCoeffs;
+		//std::cout << "ねじれパラメータdistCoeffs=\n" << distCoeffs << std::endl;
+
+		//マーカ辞書作成 6x6マスのマーカを250種類生成
+		cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_6X6_250);
+
+		//charucoボード生成 10x7マスのチェスボード、グリッドのサイズ0.04f、グリッド内マーカのサイズ0.02f
+		cv::Ptr<cv::aruco::CharucoBoard> board = cv::aruco::CharucoBoard::create(10, 7, 0.04f, 0.02f, dictionary);
+
+		//マーカー検出時メソッドを指定
+		cv::Ptr<cv::aruco::DetectorParameters> params = cv::aruco::DetectorParameters::create();
+
+		std::vector<int> markerIds;
+		std::vector<std::vector<cv::Point2f> > markerCorners;
+		cv::aruco::detectMarkers(img_src, board->dictionary, markerCorners, markerIds, params);
+
+		std::vector<cv::Vec3d> rvecs,tvecs;//マーカーの姿勢(回転ベクトル、並進ベクトル)
+		cv::Mat_<double> rvecs2[50],jacobian[50];
+
+		//マーカー観測可能
+		if (markerIds.size() > 0) 
+		{
+			cv::aruco::drawDetectedMarkers(img_dst, markerCorners, markerIds);//マーカー位置を描画
+			//cv::aruco::drawDetectedMarkers(img_tate, markerCorners, markerIds);//マーカー位置を描画
+			cv::aruco::estimatePoseSingleMarkers(markerCorners, 0.05, cameraMatrix, distCoeffs, rvecs, tvecs);//マーカーの姿勢推定
+
+			for(int i=0;i<markerIds.size();i++)
+			{
+				// ROS_INFO_STREAM("markerIds("<<i<<")="<< markerIds.at(i));//マーカーID
+				int id = markerIds.at(i);
+				const auto& corners = markerCorners[i];
+				float mcx = (corners[0].x+corners[1].x)/2;//マーカー中心座標(x座標)
+				float mcy = (corners[0].y+corners[2].y)/2;//マーカー中心座標(y座標)
+				cv::circle(img_dst, cv::Point(mcx,mcy), 3, Scalar(0,255,0),  -1, cv::LINE_AA);//緑点
+				cv::aruco::drawAxis(img_dst, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);//マーカーの姿勢描写
+				// ROS_INFO_STREAM("rvecs" <<rvecs[i]);
+				// ROS_INFO_STREAM("tvecs" <<tvecs[i]);
+				cv::Rodrigues(rvecs[i],rvecs2[i],jacobian[i]);//回転ベクトルから回転行列への変換
+
+				//画像→カメラ座標変換(マーカーの中心座標を使用)
+				float depth = img_depth.at<float>(cv::Point(mcx,mcy))+100;
+
+				//Depthが取得できないコーナーを削除する+Depthの外れ値を除く
+				if(depth>0&&depth<10000)
+				{
+					double x = (mcx - 324.473) / 615.337;//ここで正規化座標もしてる
+					double y = (mcy - 241.696) / 615.458;
+
+					//camera_info.K[0]=615.337,camera_info.K[2]=324.473,camera_info.K[4]=615.458,camera_info.K[5]=241.696//内部パラメータ
+					//324.473:画像横サイズ（半分）、241.696:画像サイズ（半分）、615.337:焦点距離、615.458:焦点距離
+
+					Marker m;
+					m.id = id;
+					m.pose.position.x = depth/1000;
+					m.pose.position.y = -depth * x/1000;
+					m.pose.position.z = depth * y/1000;
+					m.pose.rotation.x = rvecs[i][0]+M_PI;
+					m.pose.rotation.y = rvecs[i][1];
+					m.pose.rotation.z = rvecs[i][2]+M_PI;
+					markers.push_back(m);
+
+					// ROS_INFO("%d, %f, %f, %f", id, m.pose.position.x, m.pose.position.y, m.pose.position.z);
+
+				}
+			}
+
+			visualization_msgs::MarkerArray markerarray_msg;
+			for (const auto& m:markers)
+			{
+				visualization_msgs::Marker marker_msg;
+				marker_msg.ns = "aruco";
+				marker_msg.header.frame_id = frame_id_camera_;
+				marker_msg.header.stamp = ros::Time::now();
+				marker_msg.id = m.id;
+				marker_msg.lifetime = ros::Duration(0.2);
+				marker_msg.pose = potbot_lib::utility::get_pose(m.pose);
+				marker_msg.type = visualization_msgs::Marker::CUBE;
+				marker_msg.scale.x = 0.025;
+				marker_msg.scale.y = 0.25;
+				marker_msg.scale.z = 0.25;
+				marker_msg.color = potbot_lib::color::get_msg(marker_msg.id);
+
+				visualization_msgs::Marker marker_axes = marker_msg;
+				marker_axes.ns = "axes";
+				marker_axes.type = visualization_msgs::Marker::LINE_LIST;
+				marker_axes.scale.x = 0.01;
+				marker_axes.scale.y = 0.001;
+				marker_axes.scale.z = 0.001;
+
+				geometry_msgs::Point orig = potbot_lib::utility::get_point(0,0,0);
+				geometry_msgs::Point unitx = potbot_lib::utility::get_point(0.3,0,0);
+				geometry_msgs::Point unity = potbot_lib::utility::get_point(0,0.3,0);
+				geometry_msgs::Point unitz = potbot_lib::utility::get_point(0,0,0.3);
+
+				std_msgs::ColorRGBA red = potbot_lib::color::get_msg("red");
+				std_msgs::ColorRGBA green = potbot_lib::color::get_msg("green");
+				std_msgs::ColorRGBA blue = potbot_lib::color::get_msg("blue");
+
+				marker_axes.points.push_back(orig);
+				marker_axes.points.push_back(unitx);
+				marker_axes.colors.push_back(red);
+				marker_axes.colors.push_back(red);
+
+				marker_axes.points.push_back(orig);
+				marker_axes.points.push_back(unity);
+				marker_axes.colors.push_back(green);
+				marker_axes.colors.push_back(green);
+
+				marker_axes.points.push_back(orig);
+				marker_axes.points.push_back(unitz);
+				marker_axes.colors.push_back(blue);
+				marker_axes.colors.push_back(blue);
+
+				markerarray_msg.markers.push_back(marker_msg);
+				markerarray_msg.markers.push_back(marker_axes);
+			}
+
+			pub_observed_marker_.publish(markerarray_msg);
+		}
+
+		cv::imshow("aruco marker", img_dst);
+		cv::waitKey(1);
+	}
+
+	void VMCLNode::initParticles()
+	{
+		particles_.resize(particle_num_);
+		particle_weight_.resize(particle_num_,1/particle_num_);
+		breez_.resize(particle_num_);
+		greed_.resize(particle_num_);
+
+		noise_.resize(noise_params_.size());
+		std::random_device seed;
+		std::mt19937 engine(seed());
+		std::vector<std::normal_distribution<>> dists(noise_params_.size());
+		for (size_t i = 0; i < noise_params_.size(); i++)
+		{
+			std::normal_distribution<> dist(noise_params_[i][0],noise_params_[i][1]);
+			dists[i] = dist;
+		}
+		
+		for (size_t i = 0; i < noise_.size(); i++)
+		{
+			for (size_t j = 0; j < particle_num_; j++)
+			{
+				noise_[i].push_back(dists[i](engine));
+			}
+		}
+	}
+
+	void VMCLNode::updateParticles()
+	{
+		double Des_RobotV=velocity_command_.linear.x+velocity_command_.linear.y;//速度ベクトルの合成
+		
+		ros::Time timestamp_now = ros::Time::now();
+		static ros::Time timestamp_pre = timestamp_now;
+		double dt = timestamp_now.toSec() - timestamp_pre.toSec();
+		timestamp_pre = timestamp_now;
+
+		double v = encoder_odometry_.twist.twist.linear.x;
+		double omega = encoder_odometry_.twist.twist.angular.z;
+
+		if(dt>0)
+		{
+			for (int i = 0; i < particle_num_; i++)
+			{
+				//目標値(Des)にノイズを入れることで擬似的に実効値(Act)を作り出している
+				// breez_[i]=velocity_command_.linear.x+noise_[0][i]*sqrt(abs(velocity_command_.linear.x)/realsec)+noise_[1][i]*sqrt(abs(velocity_command_.angular.z)/realsec);//ノイズ付き速度(山口先輩)
+				// greed_[i]=velocity_command_.angular.z+noise_[2][i]*sqrt(abs(velocity_command_.linear.x)/realsec)+noise_[3][i]*sqrt(abs(velocity_command_.angular.z)/realsec);//ノイズ付き角速度（山口先輩）
+				
+				breez_[i]=v+noise_[0][i]*sqrt(abs(v)/dt)+noise_[1][i]*sqrt(abs(omega)/dt);//ノイズ付き速度(エンコーダ基準)（鈴木先輩）
+				greed_[i]=omega+noise_[2][i]*sqrt(abs(v)/dt)+noise_[3][i]*sqrt(abs(omega)/dt);//ノイズ付き角速度（鈴木先輩）
+
+				// ROS_INFO("%d, %f, %f", i, breez_[i], greed_[i]);
 			}
 		}
 
-		visualization_msgs::MarkerArray markerarray_msg;
-		for (const auto& m:markers)
+		// double breez_min = *min_element(begin(breez_), end(breez_));
+		// double breez_max = *max_element(begin(breez_), end(breez_));
+		// double greed_min = *min_element(begin(greed_), end(greed_));
+		// double greed_max = *max_element(begin(greed_), end(greed_));
+
+		// ROS_INFO("linear, min:%f, max:%f", breez_min, breez_max);
+		// ROS_INFO("angular, min:%f, max:%f", greed_min, greed_max);
+
+		// ROS_INFO("noise");
+		// for (int i = 0; i < noise_.size(); i++) 
+		// {
+		// 	double noise_min = *min_element(begin(noise_[i]), end(noise_[i]));
+		// 	double noise_max = *max_element(begin(noise_[i]), end(noise_[i]));
+		// 	ROS_INFO("	%d, min:%f, max:%f", i, noise_min, noise_max);
+		// }
+
+		for(int v=0;v<particle_num_;v++)
 		{
-			visualization_msgs::Marker marker_msg;
-			marker_msg.header.frame_id = frame_id_camera;
-			marker_msg.header.stamp = ros::Time::now();
-			marker_msg.id = m.id;
-			marker_msg.lifetime = ros::Duration(0.2);
-			marker_msg.pose = potbot_lib::utility::get_pose(m.pose);
-			marker_msg.type = visualization_msgs::Marker::CUBE;
-			marker_msg.scale.x = 0.025;
-			marker_msg.scale.y = 0.25;
-			marker_msg.scale.z = 0.25;
-			marker_msg.color = potbot_lib::color::get_msg(marker_msg.id);
-
-			markerarray_msg.markers.push_back(marker_msg);
-		}
-
-		pub_observed_marker_.publish(markerarray_msg);
-	}
-
-	cv::imshow("aruco marker", img_dst);
-	cv::waitKey(1);
-}
-
-void VMCLNode::initParticles()
-{
-	particles_.resize(particle_num_);
-	particle_weight_.resize(particle_num_,1/particle_num_);
-	breez_.resize(particle_num_);
-	greed_.resize(particle_num_);
-
-	noise_.resize(noise_params_.size());
-	std::random_device seed;
-	std::mt19937 engine(seed());
-	std::vector<std::normal_distribution<>> dists(noise_params_.size());
-	for (size_t i = 0; i < noise_params_.size(); i++)
-	{
-		std::normal_distribution<> dist(noise_params_[i][0],noise_params_[i][1]);
-		dists[i] = dist;
-	}
-	
-	for (size_t i = 0; i < noise_.size(); i++)
-	{
-		for (size_t j = 0; j < particle_num_; j++)
-		{
-			noise_[i].push_back(dists[i](engine));
+			double th = particles_[v].rotation.z;
+			if(greed_[v]<1e-10)
+			{
+				particles_[v].position.x += dt*breez_[v]*cos(th);
+				particles_[v].position.y += dt*breez_[v]*sin(th);
+				particles_[v].rotation.z += greed_[v]*dt;
+			}
+			else
+			{
+				particles_[v].position.x += (breez_[v]/greed_[v])*(sin(th+greed_[v]*dt)-sin(th));
+				particles_[v].position.y += (breez_[v]/greed_[v])*(-cos(th+greed_[v]*dt)+cos(th));
+				particles_[v].rotation.z += greed_[v]*dt;
+			}
 		}
 	}
 }
 
-void VMCLNode::updateParticles()
-{
-	double Des_RobotV=velocity_command_.linear.x+velocity_command_.linear.y;//速度ベクトルの合成
-	
-	ros::Time timestamp_now = ros::Time::now();
-	static ros::Time timestamp_pre = timestamp_now;
-	double dt = timestamp_now.toSec() - timestamp_pre.toSec();
-	timestamp_pre = timestamp_now;
-
-	double v = encoder_odometry_.twist.twist.linear.x;
-	double omega = encoder_odometry_.twist.twist.angular.z;
-
-	if(dt>0)
-	{
-		for (int i = 0; i < particle_num_; i++)
-		{
-			//目標値(Des)にノイズを入れることで擬似的に実効値(Act)を作り出している
-			// breez_[i]=velocity_command_.linear.x+noise_[0][i]*sqrt(abs(velocity_command_.linear.x)/realsec)+noise_[1][i]*sqrt(abs(velocity_command_.angular.z)/realsec);//ノイズ付き速度(山口先輩)
-			// greed_[i]=velocity_command_.angular.z+noise_[2][i]*sqrt(abs(velocity_command_.linear.x)/realsec)+noise_[3][i]*sqrt(abs(velocity_command_.angular.z)/realsec);//ノイズ付き角速度（山口先輩）
-			
-			breez_[i]=v+noise_[0][i]*sqrt(abs(v)/dt)+noise_[1][i]*sqrt(abs(omega)/dt);//ノイズ付き速度(エンコーダ基準)（鈴木先輩）
-			greed_[i]=omega+noise_[2][i]*sqrt(abs(v)/dt)+noise_[3][i]*sqrt(abs(omega)/dt);//ノイズ付き角速度（鈴木先輩）
-
-			// ROS_INFO("%d, %f, %f", i, breez_[i], greed_[i]);
-		}
-	}
-
-	// double breez_min = *min_element(begin(breez_), end(breez_));
-	// double breez_max = *max_element(begin(breez_), end(breez_));
-	// double greed_min = *min_element(begin(greed_), end(greed_));
-	// double greed_max = *max_element(begin(greed_), end(greed_));
-
-	// ROS_INFO("linear, min:%f, max:%f", breez_min, breez_max);
-	// ROS_INFO("angular, min:%f, max:%f", greed_min, greed_max);
-
-	// ROS_INFO("noise");
-	// for (int i = 0; i < noise_.size(); i++) 
-	// {
-	// 	double noise_min = *min_element(begin(noise_[i]), end(noise_[i]));
-	// 	double noise_max = *max_element(begin(noise_[i]), end(noise_[i]));
-	// 	ROS_INFO("	%d, min:%f, max:%f", i, noise_min, noise_max);
-	// }
-
-	for(int v=0;v<particle_num_;v++)
-	{
-		double th = particles_[v].rotation.z;
-		if(greed_[v]<1e-10)
-		{
-			particles_[v].position.x += dt*breez_[v]*cos(th);
-			particles_[v].position.y += dt*breez_[v]*sin(th);
-			particles_[v].rotation.z += greed_[v]*dt;
-		}
-		else
-		{
-			particles_[v].position.x += (breez_[v]/greed_[v])*(sin(th+greed_[v]*dt)-sin(th));
-			particles_[v].position.y += (breez_[v]/greed_[v])*(-cos(th+greed_[v]*dt)+cos(th));
-			particles_[v].rotation.z += greed_[v]*dt;
-		}
-	}
-}
-
-//メイン関数
 int main(int argc,char **argv)
 {
-	ros::init(argc,argv,"vmcl_node");//rosを初期化
+	ros::init(argc,argv,"vmcl_node");
 	
-	VMCLNode vmcl;
+	tf2_ros::Buffer tfBuffer;
+    tf2_ros::TransformListener tfListener(tfBuffer);
+	vmcl::VMCLNode vmcl(&tfBuffer);
 
-  	ros::spin();//トピック更新
+  	ros::spin();
 			
 	return 0;
 }
-
-#endif

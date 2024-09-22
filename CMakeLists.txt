@@ -52,3 +52,6 @@ add_definitions(-std=c++14)
 add_executable(vmcl src/vmcl.cpp)
 add_dependencies(vmcl ${PROJECT_NAME}_generate_messages_cpp)
 target_link_libraries(vmcl ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+
+add_executable(marker_broadcaster src/broadcast.cpp)
+target_link_libraries(marker_broadcaster ${catkin_LIBRARIES})
