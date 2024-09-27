@@ -33,6 +33,9 @@
 #include <Eigen/Geometry>
 #include <iostream>
 
+#include <dynamic_reconfigure/server.h>
+#include <vmcl/VMCLConfig.h>
+
 namespace vmcl
 {
 	struct Marker
@@ -59,7 +62,11 @@ namespace vmcl
 
 			geometry_msgs::Twist velocity_command_;                //指令速度
 
-			double particle_num_=100;//パーティクル個数
+			std::vector<int> observed_marker_ids_pre_;
+			double correct_distance_ = 2.0;
+			geometry_msgs::Pose pose_diffetence_;
+
+			double particle_num_ = 100;//パーティクル個数
 
 			std::vector<potbot_lib::Pose> particles_;	//パーティクルの位置
 			std::vector<double> particle_weight_;//各パーティクルに対する重み
@@ -76,6 +83,10 @@ namespace vmcl
 			boost::shared_ptr<message_filters::Synchronizer<MySyncPolicy>> sync_;
 
 			nav_msgs::Odometry encoder_odometry_;
+
+			dynamic_reconfigure::Server<vmcl::VMCLConfig> *dsrv_;
+
+			void reconfigureCallback(const vmcl::VMCLConfig& param, uint32_t level); 
 
 			void imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg,const sensor_msgs::Image::ConstPtr& depth_msg);
 			void odomCallback(const nav_msgs::Odometry::ConstPtr& msg);

@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
   nav_msgs
   pcl_ros
+  dynamic_reconfigure
   potbot_lib
   potbot_msgs
 )
@@ -25,6 +26,10 @@ find_package(PkgConfig)
 pkg_check_modules(OpenCV REQUIRED opencv)
 # include_directories(${RealSense2_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
 # link_directories(${RealSense2_LIBRARY_DIRS} ${OpenCV_LIBRARY_DIRS})
+
+generate_dynamic_reconfigure_options(
+  cfg/VMCL.cfg
+)
 
 generate_messages(
   DEPENDENCIES
@@ -55,3 +60,6 @@ target_link_libraries(vmcl ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
 add_executable(marker_broadcaster src/broadcast.cpp)
 target_link_libraries(marker_broadcaster ${catkin_LIBRARIES})
+
+add_executable(sensor_filter src/sensor_filter.cpp)
+target_link_libraries(sensor_filter ${catkin_LIBRARIES})

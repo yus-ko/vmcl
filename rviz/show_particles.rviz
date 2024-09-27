@@ -6,9 +6,9 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /estimated pose1/Status1
+        - /encoder1/Shape1
         - /estimated pose1/Shape1
-      Splitter Ratio: 0.8852941393852234
+      Splitter Ratio: 0.6470588445663452
     Tree Height: 543
   - Class: rviz/Selection
     Name: Selection
@@ -68,31 +68,11 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        MT_curr2_world:
-          Value: true
-        camera_aligned_depth_to_color_frame:
-          Value: true
-        camera_color_frame:
-          Value: true
-        camera_color_optical_frame:
-          Value: true
-        camera_depth_frame:
-          Value: true
-        camera_depth_optical_frame:
-          Value: true
-        camera_infra1_frame:
-          Value: true
-        camera_infra1_optical_frame:
-          Value: true
-        camera_infra2_frame:
-          Value: true
-        camera_infra2_optical_frame:
+        base_footprint:
           Value: true
         camera_link:
           Value: true
         map:
-          Value: true
-        marker_0:
           Value: true
         marker_1:
           Value: true
@@ -102,57 +82,7 @@ Visualization Manager:
           Value: true
         marker_4:
           Value: true
-        robot1/base_footprint:
-          Value: true
-        robot1/base_link:
-          Value: true
-        robot1/camera_depth_frame:
-          Value: true
-        robot1/camera_depth_optical_frame:
-          Value: true
-        robot1/camera_link:
-          Value: true
-        robot1/camera_rgb_frame:
-          Value: true
-        robot1/camera_rgb_optical_frame:
-          Value: true
-        robot1/caster_back_link:
-          Value: true
-        robot1/caster_front_link:
-          Value: true
-        robot1/cliff_sensor_front_link:
-          Value: true
-        robot1/cliff_sensor_left_link:
-          Value: true
-        robot1/cliff_sensor_right_link:
-          Value: true
-        robot1/gyro_link:
-          Value: true
         robot1/odom:
-          Value: true
-        robot1/plate_bottom_link:
-          Value: true
-        robot1/plate_top_link:
-          Value: true
-        robot1/pole_bottom_0_link:
-          Value: true
-        robot1/pole_bottom_1_link:
-          Value: true
-        robot1/pole_bottom_2_link:
-          Value: true
-        robot1/pole_bottom_3_link:
-          Value: true
-        robot1/pole_bottom_4_link:
-          Value: true
-        robot1/pole_bottom_5_link:
-          Value: true
-        robot1/pole_top_0_link:
-          Value: true
-        robot1/pole_top_1_link:
-          Value: true
-        robot1/pole_top_2_link:
-          Value: true
-        robot1/pole_top_3_link:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -160,8 +90,9 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        MT_curr2_world:
-          {}
+        base_footprint:
+          camera_link:
+            {}
         map:
           marker_1:
             {}
@@ -172,69 +103,7 @@ Visualization Manager:
           marker_4:
             {}
           robot1/odom:
-            camera_link:
-              camera_aligned_depth_to_color_frame:
-                camera_color_optical_frame:
-                  {}
-              camera_color_frame:
-                {}
-              camera_depth_frame:
-                camera_depth_optical_frame:
-                  {}
-              camera_infra1_frame:
-                camera_infra1_optical_frame:
-                  {}
-              camera_infra2_frame:
-                camera_infra2_optical_frame:
-                  {}
-        marker_0:
-          {}
-        robot1/base_footprint:
-          robot1/base_link:
-            robot1/camera_rgb_frame:
-              robot1/camera_depth_frame:
-                robot1/camera_depth_optical_frame:
-                  {}
-              robot1/camera_link:
-                {}
-              robot1/camera_rgb_optical_frame:
-                {}
-            robot1/caster_back_link:
-              {}
-            robot1/caster_front_link:
-              {}
-            robot1/cliff_sensor_front_link:
-              {}
-            robot1/cliff_sensor_left_link:
-              {}
-            robot1/cliff_sensor_right_link:
-              {}
-            robot1/gyro_link:
-              {}
-            robot1/plate_bottom_link:
-              {}
-            robot1/plate_top_link:
-              {}
-            robot1/pole_bottom_0_link:
-              {}
-            robot1/pole_bottom_1_link:
-              {}
-            robot1/pole_bottom_2_link:
-              {}
-            robot1/pole_bottom_3_link:
-              {}
-            robot1/pole_bottom_4_link:
-              {}
-            robot1/pole_bottom_5_link:
-              {}
-            robot1/pole_top_0_link:
-              {}
-            robot1/pole_top_1_link:
-              {}
-            robot1/pole_top_2_link:
-              {}
-            robot1/pole_top_3_link:
-              {}
+            {}
       Update Interval: 0
       Value: true
     - Class: rviz/MarkerArray
@@ -242,7 +111,7 @@ Visualization Manager:
       Marker Topic: /debug/observed_marker
       Name: observed marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Angle Tolerance: 0.10000000149011612
@@ -270,13 +139,13 @@ Visualization Manager:
         Alpha: 1
         Axes Length: 1
         Axes Radius: 0.10000000149011612
-        Color: 114; 159; 207
+        Color: 173; 127; 168
         Head Length: 0.30000001192092896
         Head Radius: 0.20000000298023224
         Shaft Length: 0.30000001192092896
         Shaft Radius: 0.05000000074505806
         Value: Arrow
-      Topic: /debug/encoder_odometry
+      Topic: /robot1/odom/noise
       Unreliable: false
       Value: true
     - Alpha: 1
@@ -329,6 +198,40 @@ Visualization Manager:
       Topic: /estimate_odometry
       Unreliable: false
       Value: true
+    - Angle Tolerance: 0.10000000149011612
+      Class: rviz/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: false
+      Enabled: true
+      Keep: 1
+      Name: truth
+      Position Tolerance: 0.10000000149011612
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 114; 159; 207
+        Head Length: 0.30000001192092896
+        Head Radius: 0.20000000298023224
+        Shaft Length: 0.30000001192092896
+        Shaft Radius: 0.05000000074505806
+        Value: Arrow
+      Topic: /odom/time_sync
+      Unreliable: false
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -357,25 +260,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 9.294727325439453
+      Distance: 10.629776954650879
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.8881375789642334
-        Y: 0.7890676856040955
-        Z: -0.24192361533641815
+        X: 3.947100877761841
+        Y: -1.0018560886383057
+        Z: -0.6549901366233826
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.574797511100769
+      Pitch: 1.039797067642212
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.6603896617889404
+      Yaw: 3.5453872680664062
     Saved: ~
 Window Geometry:
   Displays:
@@ -394,4 +297,4 @@ Window Geometry:
     collapsed: true
   Width: 1345
   X: 575
-  Y: 57
+  Y: 27

@@ -1,9 +1,11 @@
 <launch>
    <arg name="use_rviz"                default="true"/>
    <arg name="topic_cmd"               default="cmd_vel"/>
-   <arg name="topic_odom"              default="/robot1/odom"/>
+   <arg name="topic_odom"              default="/robot1/odom/noise"/>
    <arg name="topic_rgb"               default="/camera/color/image_raw"/>
    <arg name="topic_depth"             default="/camera/aligned_depth_to_color/image_raw"/>
+   <arg name="frame_id_odom"           default="odom"/>
+   <arg name="frame_id_robot_base"     default="base_footprint"/>
    <arg name="file_rviz"               default="$(find vmcl)/rviz/show_particles.rviz"/>
    <arg name="file_marker_pose"        default="$(find vmcl)/config/aruco_marker.yaml"/>
 
@@ -22,10 +24,23 @@
       <param name="norm_noise_variance_angular_angular"  value="0.005"/>
    </node>
 
-   <node pkg="tf" type="static_transform_publisher" name="camera_tf" args="0.13 0.31 0 0 0 0 robot1/base_footprint camera_link 60"/>
-
    <node pkg="vmcl" name="marker_broadcaster" type="marker_broadcaster" output="screen">
       <rosparam file="$(arg file_marker_pose)" command="load" />
+   </node>
+   
+   <node pkg="tf" type="static_transform_publisher" name="robot1_tf" args="0 0 0 0 0 0 map robot1/odom 60"/>
+   <node pkg="tf" type="static_transform_publisher" name="camera_tf" args="0.13 0 0.31 0 0 0 $(arg frame_id_robot_base) camera_link 60"/>
+
+   <node pkg="potbot_example" type="twist_to_odometry" name="twist_to_odometry">
+      <param name="publish_tf"                value="true"/>
+      <param name="frame_id_odom"             value="$(arg frame_id_odom)"/>
+      <param name="frame_id_robot_base"       value="$(arg frame_id_robot_base)"/>
+      <remap from="rover_odo"                 to="/noise_twist"/>
+      <remap from="odom"                      to="$(arg topic_odom)"/>
+    </node>
+
+   <node pkg="vmcl" name="sensor_filter" type="sensor_filter" output="screen">
+      <remap from="odom"               to="/robot1/odom"/>
    </node>
 
    <group if="$(arg use_rviz)">

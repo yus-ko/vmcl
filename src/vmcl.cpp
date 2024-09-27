@@ -52,11 +52,37 @@ namespace vmcl
 		// LX=11.0,VX=0.25,omegaZ=1.0,THZ=0.20,LY=3.00;
 
 		initParticles();
+		
+		dsrv_ = new dynamic_reconfigure::Server<vmcl::VMCLConfig>(pnh);
+		dynamic_reconfigure::Server<vmcl::VMCLConfig>::CallbackType cb = boost::bind(&VMCLNode::reconfigureCallback, this, _1, _2);
+		dsrv_->setCallback(cb);
+
+		pose_diffetence_ = potbot_lib::utility::get_pose();
 
 	}
 
 	VMCLNode::~VMCLNode()
 	{
+	}
+
+	void VMCLNode::reconfigureCallback(const vmcl::VMCLConfig& param, uint32_t level)
+	{
+		correct_distance_ = param.correct_distance;
+	}
+
+	potbot_lib::Pose toPose(const geometry_msgs::Pose& p) {
+		potbot_lib::Pose pose;
+		pose.position.x = p.position.x;
+		pose.position.y = p.position.y;
+		pose.position.z = p.position.z;
+
+		double roll,pitch,yaw;
+		potbot_lib::utility::get_rpy(p.orientation, roll,pitch,yaw);
+		pose.rotation.x = roll;
+		pose.rotation.y = pitch;
+		pose.rotation.z = yaw;
+		
+		return pose;
 	}
 
 	Marker VMCLNode::getMarkerTruth(int id)
@@ -66,60 +92,9 @@ namespace vmcl
 		Marker marker;
 		marker.id = id;
 		marker.frame_id = source_frame_;
-
-		marker.pose.position.x = marker_msg.pose.position.x;
-		marker.pose.position.y = marker_msg.pose.position.y;
-		marker.pose.position.z = marker_msg.pose.position.z;
-
-		double roll,pitch,yaw;
-		potbot_lib::utility::get_rpy(marker_msg.pose.orientation,roll,pitch,yaw);
-		marker.pose.rotation.x = roll;
-		marker.pose.rotation.y = pitch;
-		marker.pose.rotation.z = yaw;
+		marker.pose = toPose(marker_msg.pose);
 
 		return marker;
-	}
-
-	// センサ座標系での位置と姿勢を取得する関数（仮定）
-	Eigen::Affine3d getSensorPose(const potbot_lib::Pose& p) {
-		Eigen::Affine3d sensor_pose = Eigen::Affine3d::Identity();
-		
-		// センサ座標系での位置 (例: [0.5, 0.5, 0.5])
-		sensor_pose.translation() << p.position.x, p.position.y, p.position.z;
-
-		// センサ座標系での姿勢 (例: Roll=0, Pitch=0, Yaw=0) -> 単位クォータニオン
-		// Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-		// q = Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
-		// 	Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
-		// 	Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ());
-		// sensor_pose.linear() = q.toRotationMatrix();
-
-		sensor_pose.rotate(Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
-			Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
-			Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ()));
-		
-		return sensor_pose;
-	}
-
-	// 世界座標系での点の位置と姿勢の真値を取得する関数（仮定）
-	Eigen::Affine3d getWorldPose(const potbot_lib::Pose& p) {
-		Eigen::Affine3d world_pose = Eigen::Affine3d::Identity();
-		
-		// 世界座標系での位置 (例: [1.0, 2.0, 3.0])
-		world_pose.translation() << p.position.x, p.position.y, p.position.z;
-
-		// 世界座標系での姿勢 (例: 45度回転)
-		Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
-		// q = Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
-		// 	Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
-		// 	Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ());
-		// world_pose.linear() = q.toRotationMatrix();
-
-		world_pose.rotate(Eigen::AngleAxisd(p.rotation.x, Eigen::Vector3d::UnitX())*
-			Eigen::AngleAxisd(p.rotation.y, Eigen::Vector3d::UnitY())*
-			Eigen::AngleAxisd(p.rotation.z, Eigen::Vector3d::UnitZ()));
-		
-		return world_pose;
 	}
 
 	void VMCLNode::imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg,const sensor_msgs::Image::ConstPtr& depth_msg)
@@ -159,25 +134,62 @@ namespace vmcl
 
 		// if (!observed_markers.empty()) potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(observed_markers.front().pose));
 
-		Eigen::Affine3d sensor_to_world;
+		std::vector<int> observed_marker_ids;
+		observed_marker_ids_pre_.resize(1);
 		for (const auto& marker:observed_markers)
 		{
-			// 世界座標系での真値の位置と姿勢
-			Eigen::Affine3d world_pose = getWorldPose(getMarkerTruth(marker.id).pose);
-			
-			// センサ座標系での位置と姿勢
-			Eigen::Affine3d sensor_pose = getSensorPose(marker.pose);
+			// double margin = 0.1;
+			// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker.pose));
+			if (marker.pose.position.norm() <= correct_distance_)// &&
+				// marker.pose.rotation.x > -margin && marker.pose.rotation.x < margin && 
+				// marker.pose.rotation.y > -margin && marker.pose.rotation.y < margin && 
+				// marker.pose.rotation.z > -M_PI-margin && marker.pose.rotation.z < -M_PI+margin)
+			{
 
-			// センサ座標系から世界座標系への変換を計算
-			sensor_to_world = world_pose * sensor_pose.inverse();
-			
-			// 結果の出力（センサの世界座標系での位置と姿勢）
-			// std::cout << "Sensor position in world frame: \n" 
-			// 		<< sensor_to_world.translation() << std::endl;
+				observed_marker_ids.push_back(marker.id);
+				if (!potbot_lib::utility::is_containing(marker.id, observed_marker_ids_pre_))
+				{
+					// 世界座標系での真値の位置と姿勢
+					Eigen::Affine3d world_pose = getMarkerTruth(marker.id).pose.to_affine();
+					
+					// センサ座標系での位置と姿勢
+					Eigen::Affine3d sensor_pose = marker.pose.to_affine();
 
-			// std::cout << "Sensor orientation in world frame (as rotation matrix): \n" 
-			// 		<< sensor_to_world.rotation() << std::endl;
+					// センサ座標系から世界座標系への変換を計算
+					Eigen::Affine3d sensor_to_world = world_pose * sensor_pose.inverse();
+					
+					// 結果の出力（センサの世界座標系での位置と姿勢）
+					// std::cout << "Sensor position in world frame: \n" 
+					// 		<< sensor_to_world.translation() << std::endl;
+
+					// std::cout << "Sensor orientation in world frame (as rotation matrix): \n" 
+					// 		<< sensor_to_world.rotation() << std::endl;
+
+					nav_msgs::Odometry estimate_odometry;
+					estimate_odometry.header.frame_id = source_frame_;
+					estimate_odometry.header.stamp = ros::Time::now();
+					estimate_odometry.pose.pose = potbot_lib::utility::get_pose(sensor_to_world);
+					pub_estimate_odometry_.publish(estimate_odometry);
+
+					geometry_msgs::PoseStamped camera_pose_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, source_frame_, "camera_link");
+					// potbot_lib::utility::print_pose(camera_pose.pose);
+					Eigen::Affine3d camera_pose = toPose(camera_pose_msg.pose).to_affine();
+
+					Eigen::Vector3d translation_diff = sensor_to_world.translation() - camera_pose.translation();
+					// ROS_INFO_STREAM(translation_diff);
+
+					pose_diffetence_.position.x = translation_diff.x();
+					pose_diffetence_.position.y = translation_diff.y();
+					pose_diffetence_.position.z = translation_diff.z();
+					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker.pose));
+
+				}
+				observed_marker_ids_pre_[0] = marker.id;
+
+			}
+
 		}
+		// observed_marker_ids_pre_ = observed_marker_ids;
 		
 
 		// for (const auto& p:particles_) ROS_INFO("%f, %f, %f", p.position.x, p.position.y, p.rotation.z);
@@ -196,12 +208,11 @@ namespace vmcl
 		double yhat = ysum/particles_.size();
 		double thhat = thsum/particles_.size();
 		
-		nav_msgs::Odometry estimate_odometry;
-		estimate_odometry.header.frame_id = source_frame_;
-		estimate_odometry.header.stamp = ros::Time::now();
+		// nav_msgs::Odometry estimate_odometry;
+		// estimate_odometry.header.frame_id = source_frame_;
+		// estimate_odometry.header.stamp = ros::Time::now();
 		// estimate_odometry.pose.pose = potbot_lib::utility::get_pose(xhat, yhat, 0, 0, 0, thhat);
-		estimate_odometry.pose.pose = potbot_lib::utility::get_pose(sensor_to_world);
-		pub_estimate_odometry_.publish(estimate_odometry);
+		// pub_estimate_odometry_.publish(estimate_odometry);
 		
 		std::vector<double> ss;//重みのリスト
 
@@ -292,13 +303,12 @@ namespace vmcl
 	void VMCLNode::odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 	{
 		encoder_odometry_ = *msg;
-		encoder_odometry_.header.stamp = ros::Time::now();
+		// encoder_odometry_.header.stamp = ros::Time::now();
 		static tf2_ros::TransformBroadcaster dynamic_br;
+		potbot_lib::utility::broadcast_frame(dynamic_br, source_frame_, encoder_odometry_.header.frame_id, pose_diffetence_);
+		// potbot_lib::utility::broadcast_frame(dynamic_br, encoder_odometry_.header.frame_id, encoder_odometry_.child_frame_id, encoder_odometry_.pose.pose);
 
-		potbot_lib::utility::broadcast_frame(dynamic_br, source_frame_, encoder_odometry_.header.frame_id, potbot_lib::utility::get_pose());
-		potbot_lib::utility::broadcast_frame(dynamic_br, encoder_odometry_.header.frame_id, encoder_odometry_.child_frame_id, encoder_odometry_.pose.pose);
-
-		pub_odometry_.publish(encoder_odometry_);
+		// pub_odometry_.publish(encoder_odometry_);
 	}
 
 	bool VMCLNode::getMarkerCoords(cv::Mat img_src, cv::Mat img_depth, std::vector<Marker>& markers)
