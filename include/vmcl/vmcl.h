@@ -28,6 +28,7 @@
 #include <geometry_msgs/PoseArray.h>
 
 #include <potbot_lib/utility_ros.h>
+#include <potbot_lib/filter.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -43,6 +44,14 @@ namespace vmcl
 		int id = 0;
 		std::string frame_id;
 		potbot_lib::Pose pose;
+
+		geometry_msgs::PoseStamped to_msg() const
+		{
+            geometry_msgs::PoseStamped marker_msg;
+			marker_msg.pose = potbot_lib::utility::get_pose(pose);
+			marker_msg.header.frame_id = frame_id;
+			return marker_msg;
+        }
 	};
 
 	class VMCLNode
@@ -51,19 +60,21 @@ namespace vmcl
 
 			tf2_ros::Buffer* tf_buffer_;
 
-			std::string source_frame_ = "map"; //mapフレーム
-			std::string frame_id_camera_ = "camera_link"; //mapフレーム
+			std::string source_frame_ = "map";
+			std::string frame_id_camera_ = "camera_link";
 
 			ros::NodeHandle nh_sub_;
 			ros::Subscriber sub_odom_;
 			message_filters::Subscriber<sensor_msgs::Image> sub_rgb_;
 			message_filters::Subscriber<sensor_msgs::Image> sub_depth_;
+			message_filters::Subscriber<sensor_msgs::CameraInfo> sub_info_;
 			ros::Publisher pub_estimate_odometry_, pub_particles_, pub_odometry_, pub_observed_marker_;
 
-			geometry_msgs::Twist velocity_command_;                //指令速度
+			potbot_lib::filter::MoveMeanPose* pose_filter_ = nullptr;
 
 			std::vector<int> observed_marker_ids_pre_;
 			double correct_distance_ = 2.0;
+			double depth_scaling_ = 1.0;
 			geometry_msgs::Pose pose_diffetence_;
 
 			double particle_num_ = 100;//パーティクル個数
@@ -77,7 +88,7 @@ namespace vmcl
 			std::vector<double> greed_;//ノイズ付きパーティクル
 
 			// ApproximateTimeポリシーの定義
-			typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image> MySyncPolicy;
+			typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
 			
 			// 同期器の定義
 			boost::shared_ptr<message_filters::Synchronizer<MySyncPolicy>> sync_;
@@ -85,14 +96,17 @@ namespace vmcl
 			nav_msgs::Odometry encoder_odometry_;
 
 			dynamic_reconfigure::Server<vmcl::VMCLConfig> *dsrv_;
+			potbot_lib::Point debug_eular_;
+			int move_mean_window_num_ = 10;
 
 			void reconfigureCallback(const vmcl::VMCLConfig& param, uint32_t level); 
 
-			void imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg,const sensor_msgs::Image::ConstPtr& depth_msg);
+			void imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg);
 			void odomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 
-			bool getMarkerCoords(cv::Mat img_src, cv::Mat img_depth, std::vector<Marker>& markers);
+			bool getMarkerCoords(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, std::vector<Marker>& markers);
 			Marker getMarkerTruth(int id);
+			void publishMarker(const std::vector<Marker>& markers);
 			void initParticles();
 			void updateParticles();
 

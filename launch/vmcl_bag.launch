@@ -1,16 +1,16 @@
 <launch>
-   <arg name="multi_robot"             default="robot_0"/>
+   <arg name="multi_robot"             default="robot1"/>
    <arg name="use_rviz"                default="true"/>
-   <arg name="use_bag"                 default="false"/>
-   <arg name="use_remote"              default="true"/>
+   <arg name="use_bag"                 default="true"/>
+   <arg name="use_remote"              default="false"/>
    <arg name="topic_cmd"               default="cmd_vel"/>
-   <arg name="topic_odom"              default="/$(arg multi_robot)/odom"/>
-   <arg name="topic_rgb"               default="/$(arg multi_robot)/camera/rgb/image_raw"/>
-   <arg name="topic_depth"             default="/$(arg multi_robot)/camera/depth/image_raw"/>
-   <arg name="topic_info"              default="/$(arg multi_robot)/camera/rgb/camera_info"/>
+   <arg name="topic_odom"              default="/robot1/odom/noise"/>
+   <arg name="topic_rgb"               default="/camera/color/image_raw"/>
+   <arg name="topic_depth"             default="/camera/aligned_depth_to_color/image_raw"/>
+   <arg name="topic_info"              default="/camera/color/camera_info"/>
    <arg name="frame_id_odom"           default="$(arg multi_robot)/odom"/>
-   <arg name="frame_id_robot_base"     default="$(arg multi_robot)/base_footprint"/>
-   <arg name="frame_id_camera_link"    default="$(arg multi_robot)/camera_link"/>
+   <arg name="frame_id_robot_base"     default="$(arg multi_robot)//base_footprint"/>
+   <arg name="frame_id_camera_link"    default="camera_link"/>
    <arg name="file_rviz"               default="$(find vmcl)/rviz/show_particles.rviz"/>
    <arg name="file_marker_pose"        default="$(find vmcl)/config/aruco_marker.yaml"/>
    <arg name="file_urdf"               default="$(find turtlebot3_description)/urdf/turtlebot3_waffle.urdf.xacro"/>
@@ -38,7 +38,7 @@
       <param name="norm_noise_variance_angular_linear"   value="0.001"/>
       <param name="norm_noise_mean_angular_angular"      value="0.0"/>
       <param name="norm_noise_variance_angular_angular"  value="0.005"/>
-      <param name="depth_scaling"                        value="1"/>
+      <param name="depth_scaling"                        value="1000"/>
       <param name="move_mean_window_num"                 value="40"/>
    </node>
 

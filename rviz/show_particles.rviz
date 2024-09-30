@@ -68,10 +68,6 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        base_footprint:
-          Value: true
-        camera_link:
-          Value: true
         map:
           Value: true
         marker_1:
@@ -82,7 +78,29 @@ Visualization Manager:
           Value: true
         marker_4:
           Value: true
-        robot1/odom:
+        robot_0/base_footprint:
+          Value: true
+        robot_0/base_link:
+          Value: true
+        robot_0/base_scan:
+          Value: true
+        robot_0/camera_depth_frame:
+          Value: true
+        robot_0/camera_depth_optical_frame:
+          Value: true
+        robot_0/camera_link:
+          Value: true
+        robot_0/camera_rgb_frame:
+          Value: true
+        robot_0/camera_rgb_optical_frame:
+          Value: true
+        robot_0/caster_back_left_link:
+          Value: true
+        robot_0/caster_back_right_link:
+          Value: true
+        robot_0/imu_link:
+          Value: true
+        robot_0/odom:
           Value: true
       Marker Scale: 1
       Name: TF
@@ -90,9 +108,6 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        base_footprint:
-          camera_link:
-            {}
         map:
           marker_1:
             {}
@@ -102,8 +117,24 @@ Visualization Manager:
             {}
           marker_4:
             {}
-          robot1/odom:
-            {}
+          robot_0/odom:
+            robot_0/base_footprint:
+              robot_0/base_link:
+                robot_0/base_scan:
+                  {}
+                robot_0/camera_link:
+                  robot_0/camera_depth_frame:
+                    robot_0/camera_depth_optical_frame:
+                      {}
+                  robot_0/camera_rgb_frame:
+                    robot_0/camera_rgb_optical_frame:
+                      {}
+                robot_0/caster_back_left_link:
+                  {}
+                robot_0/caster_back_right_link:
+                  {}
+                robot_0/imu_link:
+                  {}
       Update Interval: 0
       Value: true
     - Class: rviz/MarkerArray
@@ -111,7 +142,8 @@ Visualization Manager:
       Marker Topic: /debug/observed_marker
       Name: observed marker
       Namespaces:
-        {}
+        aruco: true
+        axes: true
       Queue Size: 100
       Value: true
     - Angle Tolerance: 0.10000000149011612
@@ -154,7 +186,7 @@ Visualization Manager:
       Axes Radius: 0.009999999776482582
       Class: rviz/PoseArray
       Color: 255; 25; 0
-      Enabled: true
+      Enabled: false
       Head Length: 0.07000000029802322
       Head Radius: 0.029999999329447746
       Name: particles
@@ -163,7 +195,7 @@ Visualization Manager:
       Shape: Arrow (Flat)
       Topic: /particles_posearray
       Unreliable: false
-      Value: true
+      Value: false
     - Angle Tolerance: 0.10000000149011612
       Class: rviz/Odometry
       Covariance:
@@ -260,25 +292,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 10.629776954650879
+      Distance: 12.73168659210205
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.947100877761841
-        Y: -1.0018560886383057
-        Z: -0.6549901366233826
+        X: 4.163566589355469
+        Y: 1.0044366121292114
+        Z: -4.801275253295898
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.039797067642212
+      Pitch: 0.9047971963882446
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.5453872680664062
+      Yaw: 3.4022040367126465
     Saved: ~
 Window Geometry:
   Displays:
