@@ -14,6 +14,7 @@
    <arg name="file_rviz"               default="$(find vmcl)/rviz/show_particles.rviz"/>
    <arg name="file_marker_pose"        default="$(find vmcl)/config/aruco_marker.yaml"/>
    <arg name="file_urdf"               default="$(find turtlebot3_description)/urdf/turtlebot3_waffle.urdf.xacro"/>
+   <arg name="depth_scaling"           default="1000"/>
 
    <group if="$(arg use_remote)">
       <include file="$(find potbot_example)/launch/env/remote.launch">
@@ -38,7 +39,7 @@
       <param name="norm_noise_variance_angular_linear"   value="0.001"/>
       <param name="norm_noise_mean_angular_angular"      value="0.0"/>
       <param name="norm_noise_variance_angular_angular"  value="0.005"/>
-      <param name="depth_scaling"                        value="1"/>
+      <param name="depth_scaling"                        value="$(arg depth_scaling)"/>
       <param name="move_mean_window_num"                 value="40"/>
    </node>
 

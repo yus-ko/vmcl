@@ -125,6 +125,7 @@ namespace vmcl
 		std::vector<Marker> observed_markers;
 		getMarkerCoords(rgb_msg, depth_msg, info_msg, observed_markers);
 		publishMarker(observed_markers);
+		// ROS_INFO_STREAM(observed_markers.size());
 
 		// if (!observed_markers.empty()) potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(observed_markers.front().pose));
 
