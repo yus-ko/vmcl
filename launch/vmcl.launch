@@ -1,27 +1,19 @@
 <launch>
-   <arg name="multi_robot"             default="robot_0"/>
    <arg name="use_rviz"                default="true"/>
-   <arg name="use_bag"                 default="false"/>
-   <arg name="use_remote"              default="true"/>
-   <arg name="topic_cmd"               default="cmd_vel"/>
-   <arg name="topic_odom"              default="/$(arg multi_robot)/odom"/>
-   <arg name="topic_rgb"               default="/$(arg multi_robot)/camera/rgb/image_raw"/>
-   <arg name="topic_depth"             default="/$(arg multi_robot)/camera/depth/image_raw"/>
-   <arg name="topic_info"              default="/$(arg multi_robot)/camera/rgb/camera_info"/>
-   <arg name="frame_id_odom"           default="$(arg multi_robot)/odom"/>
-   <arg name="frame_id_robot_base"     default="$(arg multi_robot)/base_footprint"/>
-   <arg name="frame_id_camera_link"    default="$(arg multi_robot)/camera_link"/>
+   <arg name="topic_odom"              default="/odom"/>
+   <arg name="topic_rgb"               default="/camera/rgb/image_raw"/>
+   <arg name="topic_depth"             default="/camera/depth/image_raw"/>
+   <arg name="topic_info"              default="/camera/rgb/camera_info"/>
+   <arg name="frame_id_odom"           default="odom"/>
+   <arg name="frame_id_robot_base"     default="base_footprint"/>
+   <arg name="frame_id_camera_link"    default="camera_link"/>
    <arg name="file_rviz"               default="$(find vmcl)/rviz/show_particles.rviz"/>
    <arg name="file_marker_pose"        default="$(find vmcl)/config/aruco_marker.yaml"/>
-   <arg name="file_urdf"               default="$(find turtlebot3_description)/urdf/turtlebot3_waffle.urdf.xacro"/>
    <arg name="depth_scaling"           default="1000"/>
-
-   <group if="$(arg use_remote)">
-      <include file="$(find potbot_example)/launch/env/remote.launch">
-        <arg name="urdf_file"               value="$(find xacro)/xacro --inorder '$(arg file_urdf)'"/>
-        <arg name="multi_robot_name"        value="$(arg multi_robot)"/>
-      </include>
-    </group>
+   <arg name="move_mean_window_num"    default="10"/>
+   <arg name="initial_pose_x"          default="0"/>
+   <arg name="initial_pose_y"          default="0"/>
+   <arg name="initial_pose_yaw"        default="0"/>
 
    <node pkg="vmcl" name="vmcl" type="vmcl" output="screen">
       <remap from="odom"               to="$(arg topic_odom)"/>
@@ -40,29 +32,16 @@
       <param name="norm_noise_mean_angular_angular"      value="0.0"/>
       <param name="norm_noise_variance_angular_angular"  value="0.005"/>
       <param name="depth_scaling"                        value="$(arg depth_scaling)"/>
-      <param name="move_mean_window_num"                 value="40"/>
+      <param name="move_mean_window_num"                 value="$(arg move_mean_window_num)"/>
+
+      <param name="initial_pose_x"                       value="$(arg initial_pose_x)"/>
+      <param name="initial_pose_y"                       value="$(arg initial_pose_y)"/>
+      <param name="initial_pose_yaw"                     value="$(arg initial_pose_yaw)"/>
    </node>
 
    <node pkg="vmcl" name="marker_broadcaster" type="marker_broadcaster" output="screen">
       <rosparam file="$(arg file_marker_pose)" command="load" />
    </node>
-   
-   <group if="$(arg use_bag)">
-      <!-- <node pkg="tf" type="static_transform_publisher" name="robot1_tf" args="0 0 0 0 0 0 map $(arg frame_id_odom) 60"/> -->
-      <node pkg="tf" type="static_transform_publisher" name="camera_tf" args="0.13 0 0.31 0 0 0 $(arg frame_id_robot_base) $(arg frame_id_camera_link) 60"/>
-
-      <node pkg="potbot_example" type="twist_to_odometry" name="twist_to_odometry">
-         <param name="publish_tf"                value="true"/>
-         <param name="frame_id_odom"             value="$(arg frame_id_odom)"/>
-         <param name="frame_id_robot_base"       value="$(arg frame_id_robot_base)"/>
-         <remap from="rover_odo"                 to="/noise_twist"/>
-         <remap from="odom"                      to="$(arg topic_odom)"/>
-      </node>
-
-      <node pkg="vmcl" name="sensor_filter" type="sensor_filter" output="screen">
-         <remap from="odom"               to="/robot1/odom"/>
-      </node>
-   </group>
 
    <group if="$(arg use_rviz)">
       <node pkg="rviz" type="rviz" name="rviz_vmcl" required="true" args="-d $(arg file_rviz)"/>

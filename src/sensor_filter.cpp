@@ -2,6 +2,7 @@
 
 ros::Publisher g_pub_noise_twist;
 ros::Publisher g_pub_time_sync_odometry;
+double g_variance = 0.1;
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 {
@@ -10,7 +11,7 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 
 	static std::random_device seed;
 	static std::mt19937 engine(seed());
-	static std::normal_distribution<> dist(0.0, 0.1);
+	static std::normal_distribution<> dist(0.0, g_variance);
 	vel.linear.x += dist(engine);
 	vel.angular.z += dist(engine);
 
@@ -24,11 +25,9 @@ int main(int argc,char **argv)
 {
 	ros::init(argc,argv,"add_noise");
 
-	std::vector<vmcl::Marker> markers_truth; //マーカーの世界座標
 
 	ros::NodeHandle pnh("~");
-	XmlRpc::XmlRpcValue markers;
-	pnh.getParam("markers", markers);
+	pnh.getParam("variance", g_variance);
 	
 	ros::NodeHandle nh;
 	ros::Subscriber sub_odom = nh.subscribe("odom", 1, odomCallback);

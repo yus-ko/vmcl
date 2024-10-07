@@ -62,20 +62,23 @@ namespace vmcl
 
 			std::string source_frame_ = "map";
 			std::string frame_id_camera_ = "camera_link";
+			std::string frame_id_odom_ = "odom";
 
 			ros::NodeHandle nh_sub_;
-			ros::Subscriber sub_odom_;
+			ros::Subscriber sub_odom_, sub_inipose_;
 			message_filters::Subscriber<sensor_msgs::Image> sub_rgb_;
 			message_filters::Subscriber<sensor_msgs::Image> sub_depth_;
 			message_filters::Subscriber<sensor_msgs::CameraInfo> sub_info_;
 			ros::Publisher pub_estimate_odometry_, pub_particles_, pub_odometry_, pub_observed_marker_;
+			tf2_ros::TransformBroadcaster dynamic_br_;
 
 			potbot_lib::filter::MoveMeanPose* pose_filter_ = nullptr;
+			// potbot_lib::filter::LowPassPose* pose_filter_ = nullptr;
 
 			std::vector<int> observed_marker_ids_pre_;
 			double correct_distance_ = 2.0;
 			double depth_scaling_ = 1.0;
-			geometry_msgs::Pose pose_diffetence_;
+			geometry_msgs::Pose pose_difference_, pose_target_;
 
 			double particle_num_ = 100;//パーティクル個数
 
@@ -98,11 +101,13 @@ namespace vmcl
 			dynamic_reconfigure::Server<vmcl::VMCLConfig> *dsrv_;
 			potbot_lib::Point debug_eular_;
 			int move_mean_window_num_ = 10;
+			double low_pass_coefficient_ = 0.5;
 
 			void reconfigureCallback(const vmcl::VMCLConfig& param, uint32_t level); 
 
 			void imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg);
 			void odomCallback(const nav_msgs::Odometry::ConstPtr& msg);
+			void iniposeCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg);
 
 			bool getMarkerCoords(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, std::vector<Marker>& markers);
 			Marker getMarkerTruth(int id);
