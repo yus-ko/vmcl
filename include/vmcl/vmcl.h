@@ -53,7 +53,7 @@ namespace vmcl
 			return marker_msg;
         }
 	};
-
+	
 	class VMCLNode
 	{
 		private:
@@ -80,16 +80,6 @@ namespace vmcl
 			double depth_scaling_ = 1.0;
 			geometry_msgs::Pose pose_difference_, pose_target_;
 
-			double particle_num_ = 100;//パーティクル個数
-
-			std::vector<potbot_lib::Pose> particles_;	//パーティクルの位置
-			std::vector<double> particle_weight_;//各パーティクルに対する重み
-			std::vector<std::vector<double>> noise_;
-			std::vector<std::vector<double>> noise_params_;
-
-			std::vector<double> breez_;//ノイズ付きパーティクル速度
-			std::vector<double> greed_;//ノイズ付きパーティクル
-
 			// ApproximateTimeポリシーの定義
 			typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
 			
@@ -112,8 +102,7 @@ namespace vmcl
 			bool getMarkerCoords(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, std::vector<Marker>& markers);
 			Marker getMarkerTruth(int id);
 			void publishMarker(const std::vector<Marker>& markers);
-			void initParticles();
-			void updateParticles();
+			void publishParticles();
 
 		public:
 			VMCLNode(tf2_ros::Buffer* tf);

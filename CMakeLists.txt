@@ -63,3 +63,6 @@ target_link_libraries(marker_broadcaster ${catkin_LIBRARIES})
 
 add_executable(sensor_filter src/sensor_filter.cpp)
 target_link_libraries(sensor_filter ${catkin_LIBRARIES})
+
+add_library(${PROJECT_NAME}_lib src/particle.cpp)
+target_link_libraries(${PROJECT_NAME}_lib ${catkin_LIBRARIES})
