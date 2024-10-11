@@ -7,10 +7,10 @@
 #include <math.h>
 #include <opencv2/opencv.hpp>
 #include <opencv/highgui.h>
-#include <cv_bridge/cv_bridge.h>         //画像変換のヘッダ
-#include <sensor_msgs/Image.h>           //センサーデータ形式ヘッダ
-#include <sensor_msgs/image_encodings.h> //エンコードのためのヘッダ
-#include <sensor_msgs/CameraInfo.h>      //camera_infoを獲得するためのヘッダー
+#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/Image.h>
+#include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/CameraInfo.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
@@ -21,14 +21,15 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <opencv2/aruco/charuco.hpp> //マーカー検出
-#include <nav_msgs/Path.h>           //経路情報を記録する
+#include <nav_msgs/Path.h>
 
-#include <geometry_msgs/Twist.h> //ロボットの指令値(速度)用ヘッダー
+#include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseArray.h>
 
 #include <potbot_lib/utility_ros.h>
 #include <potbot_lib/filter.h>
+#include <vmcl/particle.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -42,7 +43,7 @@ namespace vmcl
 	struct Marker
 	{
 		int id = 0;
-		std::string frame_id;
+		std::string frame_id = "";
 		potbot_lib::Pose pose;
 
 		geometry_msgs::PoseStamped to_msg() const
@@ -62,6 +63,7 @@ namespace vmcl
 
 			std::string source_frame_ = "map";
 			std::string frame_id_camera_ = "camera_link";
+			std::string frame_id_robot_ = "base_footprint";
 			std::string frame_id_odom_ = "odom";
 
 			ros::NodeHandle nh_sub_;
@@ -72,21 +74,23 @@ namespace vmcl
 			ros::Publisher pub_estimate_odometry_, pub_particles_, pub_odometry_, pub_observed_marker_;
 			tf2_ros::TransformBroadcaster dynamic_br_;
 
+			Particle* particle_ = nullptr;
+
 			potbot_lib::filter::MoveMeanPose* pose_filter_ = nullptr;
 			// potbot_lib::filter::LowPassPose* pose_filter_ = nullptr;
 
 			std::vector<int> observed_marker_ids_pre_;
 			double correct_distance_ = 2.0;
 			double depth_scaling_ = 1.0;
+			double resampling_period_ = 1.0;
 			geometry_msgs::Pose pose_difference_, pose_target_;
 
-			// ApproximateTimeポリシーの定義
 			typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> MySyncPolicy;
-			
-			// 同期器の定義
 			boost::shared_ptr<message_filters::Synchronizer<MySyncPolicy>> sync_;
 
 			nav_msgs::Odometry encoder_odometry_;
+			std::vector<Marker> observed_markers_;
+			potbot_lib::Pose estimated_pose_;
 
 			dynamic_reconfigure::Server<vmcl::VMCLConfig> *dsrv_;
 			potbot_lib::Point debug_eular_;
@@ -101,8 +105,10 @@ namespace vmcl
 
 			bool getMarkerCoords(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, std::vector<Marker>& markers);
 			Marker getMarkerTruth(int id);
+			potbot_lib::Pose getRobotFromMarker(const std::vector<Marker>& markers);
 			void publishMarker(const std::vector<Marker>& markers);
-			void publishParticles();
+
+			void fixOdomPose();
 
 		public:
 			VMCLNode(tf2_ros::Buffer* tf);

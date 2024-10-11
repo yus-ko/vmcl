@@ -40,8 +40,8 @@ generate_messages(
 )
 
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES vmcl
+  # INCLUDE_DIRS include
+  # LIBRARIES ${PROJECT_NAME}
   CATKIN_DEPENDS roscpp rospy sensor_msgs message_runtime std_msgs
 #  DEPENDS system_lib
 )
@@ -52,11 +52,13 @@ include_directories(
   ${OpenCV_INCLUDE_DIRS}
 )
 
-add_definitions(-std=c++14)
+# add_library(${PROJECT_NAME} src/particle.cpp)
+# add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 
-add_executable(vmcl src/vmcl.cpp)
-add_dependencies(vmcl ${PROJECT_NAME}_generate_messages_cpp)
-target_link_libraries(vmcl ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+add_executable(vmcl_node src/vmcl.cpp src/particle.cpp)
+add_dependencies(vmcl_node ${PROJECT_NAME}_generate_messages_cpp)
+target_link_libraries(vmcl_node ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
 add_executable(marker_broadcaster src/broadcast.cpp)
 target_link_libraries(marker_broadcaster ${catkin_LIBRARIES})
@@ -64,5 +66,4 @@ target_link_libraries(marker_broadcaster ${catkin_LIBRARIES})
 add_executable(sensor_filter src/sensor_filter.cpp)
 target_link_libraries(sensor_filter ${catkin_LIBRARIES})
 
-add_library(${PROJECT_NAME}_lib src/particle.cpp)
-target_link_libraries(${PROJECT_NAME}_lib ${catkin_LIBRARIES})
+add_definitions(-std=c++14)

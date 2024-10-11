@@ -1,8 +1,5 @@
 #include <vmcl/vmcl.h>
 
-using namespace std;
-using namespace cv;
-
 namespace vmcl
 {
 	VMCLNode::VMCLNode(tf2_ros::Buffer* tf)
@@ -16,6 +13,7 @@ namespace vmcl
 		double m_wv=0, v_wv=0;
 		double m_ww=0, v_ww=0;
 		double x=0,y=0,yaw=0;
+		int pnum = 100;
 
 		pnh.getParam("norm_noise_mean_linear_linear", m_vv);
 		pnh.getParam("norm_noise_variance_linear_linear", v_vv);
@@ -30,13 +28,14 @@ namespace vmcl
 		pnh.getParam("initial_pose_x", x);
 		pnh.getParam("initial_pose_y", y);
 		pnh.getParam("initial_pose_yaw", yaw);
+		pnh.getParam("particle_num", pnum);
 
-		// noise_params_ = {
-		// 	{m_vv,v_vv},	//直進で生じる道のり
-		// 	{m_vw,v_vw},	//回転で生じる道のり
-		// 	{m_wv,v_wv},
-		// 	{m_ww,v_ww}
-		// };
+		std::vector<std::vector<double>> noise_params = {
+			{m_vv,v_vv},	//直進で生じる道のり
+			{m_vw,v_vw},	//回転で生じる道のり
+			{m_wv,v_wv},
+			{m_ww,v_ww}
+		};
 
 		pose_difference_ = potbot_lib::utility::get_pose(x,y,0,0,0,yaw);
 
@@ -51,17 +50,13 @@ namespace vmcl
 		sync_->registerCallback(boost::bind(&VMCLNode::imageCallback, this, _1, _2, _3));
 
 		ros::NodeHandle nhPub;
-		pub_estimate_odometry_ = nhPub.advertise<nav_msgs::Odometry>("estimate_odometry",1000);
-		pub_particles_ = nhPub.advertise<geometry_msgs::PoseArray>("particles_posearray",1000);
-		pub_odometry_ = nhPub.advertise<nav_msgs::Odometry>("debug/encoder_odometry",1000);
-		pub_observed_marker_ = nhPub.advertise<visualization_msgs::MarkerArray>("debug/observed_marker",1000);
+		pub_estimate_odometry_ = nhPub.advertise<nav_msgs::Odometry>("estimate_odometry",1);
+		pub_particles_ = nhPub.advertise<geometry_msgs::PoseArray>("particles_posearray",1);
+		pub_odometry_ = nhPub.advertise<nav_msgs::Odometry>("debug/encoder_odometry",1);
+		pub_observed_marker_ = nhPub.advertise<visualization_msgs::MarkerArray>("debug/observed_marker",1);
 
-		//2024-07-31廊下(直進11.0m,速度0.25)直線動作実験
-		//rosbag play 2024-07-31-13-10-22.bag//実測値(X:11.400,Y:3.262)
-		//rosbag play 2024-07-31-13-34-34.bag//実測値(X:11.050,Y:3.110)
-		// LX=11.0,VX=0.25,omegaZ=1.0,THZ=0.20,LY=3.00;
-
-		// initParticles();
+		particle_ = new Particle(pnum);
+		particle_->setParticleNoiseParams(noise_params);
 
 		pose_filter_ = new potbot_lib::filter::MoveMeanPose(move_mean_window_num_);
 		// pose_filter_ = new potbot_lib::filter::LowPassPose(move_mean_window_num_);
@@ -83,6 +78,8 @@ namespace vmcl
 		low_pass_coefficient_ = param.low_pass_coefficient;
 		pose_filter_->setWindowNum(move_mean_window_num_);
 		// pose_filter_->setFilterCoefficient(low_pass_coefficient_);
+		particle_->setVariance(param.variance_distance, param.variance_angle);
+		resampling_period_ = param.resampling_period;
 		debug_eular_.x = param.debug_roll;
 		debug_eular_.y = param.debug_ptich;
 		debug_eular_.z = param.debug_yaw;
@@ -105,13 +102,16 @@ namespace vmcl
 
 	Marker VMCLNode::getMarkerTruth(int id)
 	{
-		geometry_msgs::PoseStamped marker_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, source_frame_, "marker_" + std::to_string(id));
-
 		Marker marker;
-		marker.id = id;
-		marker.frame_id = source_frame_;
-		marker.pose = toPose(marker_msg.pose);
+		std::string frame_id_marker = "marker_" + std::to_string(id);
+		if (tf_buffer_->canTransform(source_frame_, frame_id_marker, ros::Time(0)))
+		{
+			geometry_msgs::PoseStamped marker_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, source_frame_, frame_id_marker);
 
+			marker.id = id;
+			marker.frame_id = source_frame_;
+			marker.pose = toPose(marker_msg.pose);
+		}
 		return marker;
 	}
 
@@ -128,83 +128,49 @@ namespace vmcl
 		return affineTransform;
 	}
 
+	potbot_lib::Pose VMCLNode::getRobotFromMarker(const std::vector<Marker>& markers)
+	{
+		for (const auto& marker:markers)
+		{
+			// 世界座標系マーカー（既知）
+			Eigen::Affine3d marker_world = getMarkerTruth(marker.id).pose.to_affine();
+			
+			// ロボット座標系マーカー（既知）
+			Eigen::Affine3d marker_robot = marker.pose.to_affine();
+			if (marker.frame_id != frame_id_robot_)
+			{
+				geometry_msgs::PoseStamped marker_robot_msg = potbot_lib::utility::get_tf(*tf_buffer_, marker.to_msg(), frame_id_robot_);
+				marker_robot = poseMsgToAffine(marker_robot_msg.pose);
+			}
+
+			// 世界座標系ロボット（未知）
+			Eigen::Affine3d robot_world = marker_world * marker_robot.inverse();
+			// pose_filter_->setData(potbot_lib::Pose(robot_world));
+			// robot_world = pose_filter_->mean().to_affine();
+
+			return potbot_lib::Pose(robot_world);
+		}
+	}
+
 	void VMCLNode::imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg)
 	{	
 		std::string frame_id_image = rgb_msg->header.frame_id;
-		std::vector<Marker> observed_markers;
-		getMarkerCoords(rgb_msg, depth_msg, info_msg, observed_markers);
-		publishMarker(observed_markers);
-		// ROS_INFO_STREAM(observed_markers.size());
+		std::vector<Marker> observed_markers_camera;
+		getMarkerCoords(rgb_msg, depth_msg, info_msg, observed_markers_camera);
+		publishMarker(observed_markers_camera);
+		// ROS_INFO_STREAM(observed_markers_camera.size());
 
-		// if (!observed_markers.empty()) potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(observed_markers.front().pose));
+		// if (!observed_markers_camera.empty()) potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(observed_markers_camera.front().pose));
 
-		std::vector<int> observed_marker_ids;
-		observed_marker_ids_pre_.resize(1);
-		// if (tf_buffer_->canTransform("robot_0/odom","map",ros::Time::now()))
-		// 	pose_difference_ = potbot_lib::utility::get_frame_pose(*tf_buffer_,"map","robot_0/odom").pose;
-		for (const auto& marker:observed_markers)
+		observed_markers_ = observed_markers_camera;
+		for (size_t i = 0; i < observed_markers_camera.size(); i++)
 		{
-			// double margin = 0.1;
-			// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker.pose));
-			if (marker.pose.position.norm() <= correct_distance_)// &&
-				// marker.pose.rotation.x > -margin && marker.pose.rotation.x < margin && 
-				// marker.pose.rotation.y > -margin && marker.pose.rotation.y < margin && 
-				// marker.pose.rotation.z > -M_PI-margin && marker.pose.rotation.z < -M_PI+margin)
-			{
-
-				observed_marker_ids.push_back(marker.id);
-				if (!potbot_lib::utility::is_containing(marker.id, observed_marker_ids_pre_) || true)
-				{
-					// 世界座標系マーカー（既知）
-					Eigen::Affine3d marker_world = getMarkerTruth(marker.id).pose.to_affine();
-					
-					geometry_msgs::PoseStamped marker_sensor_msg = potbot_lib::utility::get_tf(*tf_buffer_, marker.to_msg(), frame_id_camera_);
-					// センサー座標系マーカー（既知）
-					Eigen::Affine3d marker_sensor = poseMsgToAffine(marker_sensor_msg.pose);
-					// marker_sensor = marker.pose.to_affine();
-					// marker_sensor =  potbot_lib::Pose{1.5,0.5,0.2,0,0,M_PI}.to_affine();
-					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_sensor));
-
-					// 世界座標系センサー（未知）
-					Eigen::Affine3d sensor_world = marker_world * marker_sensor.inverse();
-					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(sensor_world));
-					pose_filter_->setData(potbot_lib::Pose(sensor_world));
-					sensor_world = pose_filter_->mean().to_affine();
-					// sensor_world = pose_filter_->filter().to_affine();
-
-					nav_msgs::Odometry estimate_odometry;
-					estimate_odometry.header.frame_id = source_frame_;
-					estimate_odometry.child_frame_id = frame_id_camera_;
-					estimate_odometry.header.stamp = ros::Time::now();
-					estimate_odometry.pose.pose = potbot_lib::utility::get_pose(sensor_world);
-					pub_estimate_odometry_.publish(estimate_odometry);
-
-					geometry_msgs::PoseStamped camera_pose_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, frame_id_odom_, frame_id_camera_);
-
-					//オドメトリー座標系センサー
-					Eigen::Affine3d sensor_odom = toPose(camera_pose_msg.pose).to_affine();
-					
-					// Sw=So*Ow
-					// Ow=Sw*So^-1
-					Eigen::Affine3d odom_world = sensor_world*sensor_odom.inverse();
-					pose_difference_ = potbot_lib::utility::get_pose(odom_world);
-					
-					pose_difference_ = potbot_lib::utility::get_pose(
-						pose_difference_.position.x,
-						pose_difference_.position.y,
-						0,0,0,
-						tf2::getYaw(pose_difference_.orientation)
-					);
-
-					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker.pose));
-
-				}
-				observed_marker_ids_pre_[0] = marker.id;
-
-			}
-
+			observed_markers_[i].frame_id = frame_id_robot_;
+			geometry_msgs::PoseStamped marker_robot_msg = potbot_lib::utility::get_tf(*tf_buffer_, observed_markers_camera[i].to_msg(), frame_id_robot_);
+			observed_markers_[i].pose = toPose(marker_robot_msg.pose);
 		}
-		// observed_marker_ids_pre_ = observed_marker_ids;
+
+		fixOdomPose();
 
 	}
 
@@ -212,16 +178,51 @@ namespace vmcl
 	{
 		encoder_odometry_ = *msg;
 		frame_id_odom_ = encoder_odometry_.header.frame_id;
+		frame_id_robot_ = encoder_odometry_.child_frame_id;
 		encoder_odometry_.header.stamp = ros::Time::now();
 
-		potbot_lib::utility::broadcast_frame(dynamic_br_, source_frame_, encoder_odometry_.header.frame_id, pose_difference_);
-		// potbot_lib::utility::broadcast_frame(dynamic_br_, encoder_odometry_.header.frame_id, encoder_odometry_.child_frame_id, encoder_odometry_.pose.pose);
+		potbot_lib::utility::broadcast_frame(dynamic_br_, source_frame_, frame_id_odom_, pose_difference_);
 
 		// pub_odometry_.publish(encoder_odometry_);
 
-		// updateParticles();
-		// resampling();
-		// publishParticles();
+		particle_->update(encoder_odometry_.twist.twist.linear.x, encoder_odometry_.twist.twist.angular.z);
+		
+		ros::Time now = ros::Time::now();
+		static ros::Time resample_time_pre = now;
+		if (now.toSec() - resample_time_pre.toSec() > resampling_period_)
+		{
+			ROS_INFO("resampling");
+			particle_->resampling();
+			resample_time_pre = now;
+		}
+		std::vector<potbot_lib::Pose> particle_poses = particle_->getParticles();
+		geometry_msgs::PoseArray particles_msg;
+		particles_msg.header.stamp = ros::Time::now();
+		particles_msg.header.frame_id = source_frame_;
+		for(const auto& p:particle_poses) particles_msg.poses.push_back(potbot_lib::utility::get_pose(p));
+		pub_particles_.publish(particles_msg);
+		
+		// geometry_msgs::PoseStamped robot_world_msg = potbot_lib::utility::get_tf(*tf_buffer_, encoder_odometry_, source_frame_);
+
+		std::vector<potbot_lib::Pose> marker_vec;
+		for (const auto& m:observed_markers_)
+		{
+			marker_vec.push_back(m.pose);
+		}
+
+		if (!observed_markers_.empty())
+		{
+			potbot_lib::Pose robot_world = getRobotFromMarker(observed_markers_);
+			// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(robot_world));
+			particle_->weighting(robot_world, marker_vec);
+		}
+		estimated_pose_ = particle_->getEstimatedPose();
+		nav_msgs::Odometry robot_pose_msg;
+		robot_pose_msg.header.stamp = ros::Time::now();
+		robot_pose_msg.header.frame_id = source_frame_;
+		robot_pose_msg.pose.pose = potbot_lib::utility::get_pose(estimated_pose_);
+		pub_estimate_odometry_.publish(robot_pose_msg);
+
 	}
 
 	void VMCLNode::iniposeCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg)
@@ -326,7 +327,7 @@ namespace vmcl
 				const auto& corners = markerCorners[i];
 				float mcx = (corners[0].x+corners[1].x)/2;//マーカー中心座標(x座標)
 				float mcy = (corners[0].y+corners[2].y)/2;//マーカー中心座標(y座標)
-				cv::circle(img_dst, cv::Point(mcx,mcy), 3, Scalar(0,255,0),  -1, cv::LINE_AA);//緑点
+				cv::circle(img_dst, cv::Point(mcx,mcy), 3, cv::Scalar(0,255,0),  -1, cv::LINE_AA);//緑点
 				cv::aruco::drawAxis(img_dst, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);//マーカーの姿勢描写
 				// ROS_INFO_STREAM("r"<<rvecs[i]/M_PI*180);
 				// ROS_INFO_STREAM("t"<<tvecs[i]);
@@ -369,6 +370,69 @@ namespace vmcl
 		cv::imshow("aruco marker", img_dst);
 		cv::waitKey(1);
 		return true;
+	}
+
+	void VMCLNode::fixOdomPose()
+	{
+		for (const auto& marker:observed_markers_)
+		{
+			if (marker.pose.position.norm() <= correct_distance_)
+			{
+				Marker marker_truth = getMarkerTruth(marker.id);
+				// ROS_INFO("id:%d, frame:%s", marker_truth.id, marker_truth.frame_id.c_str());
+				if (marker_truth.frame_id != "")
+				{
+					Eigen::Affine3d marker_world = marker_truth.pose.to_affine();
+					Eigen::Affine3d marker_agent = estimated_pose_.to_affine().inverse()*marker_world;
+					// geometry_msgs::PoseStamped marker_agent_msg = potbot_lib::utility::get_tf(*tf_buffer_, marker.to_msg(), encoder_odometry_.child_frame_id);
+					// Eigen::Affine3d marker_agent = toPose(marker_agent_msg.pose).to_affine();
+					Eigen::Affine3d agent_odom = toPose(encoder_odometry_.pose.pose).to_affine();
+					Eigen::Affine3d odom_world = marker_world*marker_agent.inverse()*agent_odom.inverse();
+					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(estimated_pose_));
+					pose_difference_ = potbot_lib::utility::get_pose(odom_world);
+					pose_difference_ = potbot_lib::utility::get_pose(
+						pose_difference_.position.x,
+						pose_difference_.position.y,
+						0,0,0,
+						tf2::getYaw(pose_difference_.orientation)
+					);
+					break;
+					
+					
+					geometry_msgs::PoseStamped marker_sensor_msg = potbot_lib::utility::get_tf(*tf_buffer_, marker.to_msg(), frame_id_camera_);
+					// センサー座標系マーカー（既知）
+					Eigen::Affine3d marker_sensor = poseMsgToAffine(marker_sensor_msg.pose);
+					// marker_sensor = marker.pose.to_affine();
+					// marker_sensor =  potbot_lib::Pose{1.5,0.5,0.2,0,0,M_PI}.to_affine();
+					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_sensor));
+
+					// 世界座標系センサー（未知）
+					Eigen::Affine3d sensor_world = marker_world * marker_sensor.inverse();
+					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(sensor_world));
+					pose_filter_->setData(potbot_lib::Pose(sensor_world));
+					sensor_world = pose_filter_->mean().to_affine();
+					// sensor_world = pose_filter_->filter().to_affine();
+
+					// nav_msgs::Odometry estimate_odometry;
+					// estimate_odometry.header.frame_id = source_frame_;
+					// estimate_odometry.child_frame_id = frame_id_camera_;
+					// estimate_odometry.header.stamp = ros::Time::now();
+					// estimate_odometry.pose.pose = potbot_lib::utility::get_pose(sensor_world);
+					// pub_estimate_odometry_.publish(estimate_odometry);
+
+					geometry_msgs::PoseStamped camera_pose_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, frame_id_odom_, frame_id_camera_);
+
+					//オドメトリー座標系センサー
+					Eigen::Affine3d sensor_odom = toPose(camera_pose_msg.pose).to_affine();
+					
+					// Sw=So*Ow
+					// Ow=Sw*So^-1
+
+					// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker.pose));
+
+				}
+			}
+		}
 	}
 
 	void VMCLNode::publishMarker(const std::vector<Marker>& markers)
@@ -427,15 +491,6 @@ namespace vmcl
 
 		pub_observed_marker_.publish(markerarray_msg);
 	}
-
-	// void VMCLNode::publishParticles()
-	// {
-		// geometry_msgs::PoseArray particles_msg;
-		// particles_msg.header.stamp = ros::Time::now();//追加
-		// particles_msg.header.frame_id = source_frame_;//追加
-		// for(const auto& p:particles_) particles_msg.poses.push_back(potbot_lib::utility::get_pose(p));
-		// pub_particles_.publish(particles_msg);
-	// }
 }
 
 int main(int argc,char **argv)

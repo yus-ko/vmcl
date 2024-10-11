@@ -9,28 +9,17 @@ namespace vmcl
 
 	void Particle::initialize(int particle_num)
 	{
+		std::random_device seed;
+		std::mt19937 tmp(seed());
+		eng_ = tmp;
+
 		particles_.resize(particle_num);
-		particle_weight_.resize(particle_num,1/particle_num);
+		particle_weight_.resize(particle_num,1.0/double(particle_num));
 		breez_.resize(particle_num);
 		greed_.resize(particle_num);
 
-		noise_.resize(noise_params_.size());
-		std::random_device seed;
-		std::mt19937 engine(seed());
-		std::vector<std::normal_distribution<>> dists(noise_params_.size());
-		for (size_t i = 0; i < noise_params_.size(); i++)
-		{
-			std::normal_distribution<> dist(noise_params_[i][0],noise_params_[i][1]);
-			dists[i] = dist;
-		}
-		
-		for (size_t i = 0; i < noise_.size(); i++)
-		{
-			for (size_t j = 0; j < particle_num; j++)
-			{
-				noise_[i].push_back(dists[i](engine));
-			}
-		}
+		std::vector<std::vector<double>> v;
+		setParticleNoiseParams(v);
 	}
 
 	void Particle::update(double linear_vel, double angular_vel)
@@ -41,10 +30,8 @@ namespace vmcl
 		timestamp_pre = timestamp_now;
 		int particle_num = particles_.size();
 
-		// double v = encoder_odometry_.twist.twist.linear.x;
-		// double omega = encoder_odometry_.twist.twist.angular.z;
-		double v = 0.1;
-		double omega = 0.2;
+		double v = linear_vel;
+		double omega = angular_vel;
 
 		if(dt>0)
 		{
@@ -54,8 +41,8 @@ namespace vmcl
 				// breez_[i]=velocity_command_.linear.x+noise_[0][i]*sqrt(abs(velocity_command_.linear.x)/realsec)+noise_[1][i]*sqrt(abs(velocity_command_.angular.z)/realsec);//ノイズ付き速度(山口先輩)
 				// greed_[i]=velocity_command_.angular.z+noise_[2][i]*sqrt(abs(velocity_command_.linear.x)/realsec)+noise_[3][i]*sqrt(abs(velocity_command_.angular.z)/realsec);//ノイズ付き角速度（山口先輩）
 				
-				breez_[i]=v+noise_[0][i]*sqrt(abs(v)/dt)+noise_[1][i]*sqrt(abs(omega)/dt);//ノイズ付き速度(エンコーダ基準)（鈴木先輩）
-				greed_[i]=omega+noise_[2][i]*sqrt(abs(v)/dt)+noise_[3][i]*sqrt(abs(omega)/dt);//ノイズ付き角速度（鈴木先輩）
+				breez_[i]=v+particle_noise_[0](eng_)*sqrt(abs(v)/dt)+particle_noise_[1](eng_)*sqrt(abs(omega)/dt);//ノイズ付き速度(エンコーダ基準)（鈴木先輩）
+				greed_[i]=omega+particle_noise_[2](eng_)*sqrt(abs(v)/dt)+particle_noise_[3](eng_)*sqrt(abs(omega)/dt);//ノイズ付き角速度（鈴木先輩）
 
 				// ROS_INFO("%d, %f, %f", i, breez_[i], greed_[i]);
 			}
@@ -95,6 +82,61 @@ namespace vmcl
 		}
 	}
 
+	double Particle::weightFunc(double x,double xhat, double sigma)
+	{
+		double val = 1.0/sqrt(2*M_PI*pow(sigma,2))*exp(-pow(x-xhat,2)/(2*pow(sigma,2)));
+		
+		return val;
+	}
+
+	void Particle::weighting(const potbot_lib::Pose& agent_pose, const std::vector<potbot_lib::Pose>& marker_poses)
+	{
+
+		if (marker_poses.empty())
+		{
+			return;
+		}
+
+		// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_poses[0]));
+
+		Eigen::Affine3d marker_agent = marker_poses[0].to_affine();
+		Eigen::Affine3d agent_world = agent_pose.to_affine();
+
+		double distance_to_marker_from_agent = hypot(marker_poses[0].position.x, marker_poses[0].position.y);
+		double angle_to_marker_from_agent = atan2(marker_poses[0].position.y, marker_poses[0].position.x);
+		
+		int particle_num = particles_.size();
+		particle_weight_.resize(particle_num);
+		for (size_t i = 0; i < particle_num; i++)
+		{
+			Eigen::Affine3d particle_world = particles_[i].to_affine();
+			Eigen::Affine3d particle_agent = particle_world * agent_world.inverse();
+			Eigen::Affine3d marker_particle = marker_agent * particle_agent.inverse();
+			potbot_lib::Pose marker_particle_pose(marker_particle);
+
+			double distance_to_marker_from_particle = hypot(marker_particle_pose.position.x, marker_particle_pose.position.y);
+			double angle_to_marker_from_particle = atan2(marker_particle_pose.position.y, marker_particle_pose.position.x);
+			
+			double variance_distance = variance_distance_;
+			double variance_angle = variance_angle_;
+			
+			double wd = weightFunc(distance_to_marker_from_agent, distance_to_marker_from_particle, variance_distance);
+			double wth = weightFunc(angle_to_marker_from_agent, angle_to_marker_from_particle, variance_angle);
+			// ROS_INFO_STREAM(wd<<"  "<<wth);
+			double weight = wd*wth;
+			
+
+			particle_weight_[i] = weight;
+		}
+
+		double sum = 0;
+		for (const auto& w:particle_weight_) sum+=w;
+		for (auto& w:particle_weight_) w/=sum;
+		for (const auto& w:particle_weight_) sum+=w;
+		// ROS_INFO("%f, %f, %f",sum,distance_to_marker_from_agent,angle_to_marker_from_agent);
+		
+	}
+
 	void Particle::resampling()
 	{
 		int particle_num = particles_.size();
@@ -106,15 +148,9 @@ namespace vmcl
 			thsum+=p.rotation.z;
 		}
 		
-		double xhat = xsum/particles_.size();
-		double yhat = ysum/particles_.size();
-		double thhat = thsum/particles_.size();
-		
-		// nav_msgs::Odometry estimate_odometry;
-		// estimate_odometry.header.frame_id = source_frame_;
-		// estimate_odometry.header.stamp = ros::Time::now();
-		// estimate_odometry.pose.pose = potbot_lib::utility::get_pose(xhat, yhat, 0, 0, 0, thhat);
-		// pub_estimate_odometry_.publish(estimate_odometry);
+		double xhat = xsum/particle_num;
+		double yhat = ysum/particle_num;
+		double thhat = thsum/particle_num;
 		
 		std::vector<double> ss;//重みのリスト
 
@@ -190,13 +226,60 @@ namespace vmcl
 		
 		for (int i = 0; i < particle_num; i++)
 		{
-			particle_weight_.at(i)=1/particle_num;
+			particle_weight_.at(i)=1.0/(double)particle_num;
 		}
 		//リサンプリング（終わり）
 	}
 
-	void Particle::setNoiseParams(std::vector<std::vector<double>> noise_params)
+	void Particle::setParticleNoiseParams(const std::vector<std::vector<double>>& noise_params)
 	{
+		bool is_param_error = false;
+		if (noise_params.size() != 4)
+		{
+			is_param_error = true;
+		}
+		else
+		{
+			for (const auto& p:noise_params)
+			{
+				if (p.size() != 2)
+				{
+					is_param_error = true;
+					break;
+				}
+			}
+		}
+
+		if (is_param_error)
+		{
+			particle_noise_params_ = {{0,0.01},{0,0.01},{0,0.01},{0,0.01}};
+		}
+		else
+		{
+			particle_noise_params_ = noise_params;
+		}
 		
+		particle_noise_.resize(particle_noise_params_.size());
+		for (size_t i = 0; i < particle_noise_params_.size(); i++)
+		{
+			std::normal_distribution<> dist(particle_noise_params_[i][0],particle_noise_params_[i][1]);
+			particle_noise_[i] = dist;
+		}
+	}
+
+	std::vector<potbot_lib::Pose> Particle::getParticles()
+	{
+		return particles_;
+	}
+
+	potbot_lib::Pose Particle::getEstimatedPose()
+	{
+		potbot_lib::Pose estimated_pose;
+		for (size_t i = 0; i < particles_.size(); i++)
+		{
+			estimated_pose = estimated_pose + particles_[i]*particle_weight_[i];
+		}
+		// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(estimated_pose));
+		return estimated_pose;
 	}
 }
