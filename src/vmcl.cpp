@@ -65,6 +65,8 @@ namespace vmcl
 		dynamic_reconfigure::Server<vmcl::VMCLConfig>::CallbackType cb = boost::bind(&VMCLNode::reconfigureCallback, this, _1, _2);
 		dsrv_->setCallback(cb);
 
+		ROS_INFO("vmcl initialized");
+
 	}
 
 	VMCLNode::~VMCLNode()
@@ -367,8 +369,8 @@ namespace vmcl
 			}
 		}
 
-		cv::imshow("aruco marker", img_dst);
-		cv::waitKey(1);
+		// cv::imshow("aruco marker", img_dst);
+		// cv::waitKey(1);
 		return true;
 	}
 
