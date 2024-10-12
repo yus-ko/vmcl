@@ -136,16 +136,29 @@ namespace vmcl
 	{
 		for (const auto& marker:markers)
 		{
+			
+			auto marker_no_pose = marker;
+
+			auto marker_truth = getMarkerTruth(marker_no_pose.id);
+
+			marker_no_pose.pose.rotation = potbot_lib::Point(0,0,M_PI);
+
 			// 世界座標系マーカー（既知）
-			Eigen::Affine3d marker_world = getMarkerTruth(marker.id).pose.to_affine();
+			Eigen::Affine3d marker_world = marker_truth.pose.to_affine();
 			
 			// ロボット座標系マーカー（既知）
-			Eigen::Affine3d marker_robot = marker.pose.to_affine();
-			if (marker.frame_id != frame_id_robot_)
+			Eigen::Affine3d marker_robot = marker_no_pose.pose.to_affine();
+
+			if (marker_no_pose.frame_id != frame_id_robot_)
 			{
-				geometry_msgs::PoseStamped marker_robot_msg = potbot_lib::utility::get_tf(*tf_buffer_, marker.to_msg(), frame_id_robot_);
+				geometry_msgs::PoseStamped marker_robot_msg = potbot_lib::utility::get_tf(*tf_buffer_, marker_no_pose.to_msg(), frame_id_robot_);
 				marker_robot = poseMsgToAffine(marker_robot_msg.pose);
 			}
+
+			ROS_INFO("marker_world");
+			potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_world));
+			ROS_INFO("marker_robot");
+			potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_robot));
 
 			// 世界座標系ロボット（未知）
 			Eigen::Affine3d robot_world = marker_world * marker_robot.inverse();
