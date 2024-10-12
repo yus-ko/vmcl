@@ -79,6 +79,7 @@ namespace vmcl
 		correct_distance_ = param.correct_distance;
 		move_mean_window_num_ = param.move_mean_window_num;
 		low_pass_coefficient_ = param.low_pass_coefficient;
+		using_particle_filter_ = param.using_particle_filter;
 		pose_filter_->setWindowNum(move_mean_window_num_);
 		// pose_filter_->setFilterCoefficient(low_pass_coefficient_);
 		particle_->setVariance(param.variance_distance, param.variance_angle);
@@ -218,8 +219,17 @@ namespace vmcl
 			potbot_lib::Pose robot_world = getRobotFromMarker(observed_markers_);
 			// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(robot_world));
 			particle_->weighting(robot_world, marker_vec);
+
+			if (using_particle_filter_)
+			{
+				estimated_pose_ = particle_->getEstimatedPose();
+			}
+			else
+			{
+				estimated_pose_ = robot_world;
+			}
 		}
-		estimated_pose_ = particle_->getEstimatedPose();
+		
 		geometry_msgs::PoseWithCovarianceStamped robot_pose_msg;
 		robot_pose_msg.header.stamp = ros::Time::now();
 		robot_pose_msg.header.frame_id = source_frame_;
