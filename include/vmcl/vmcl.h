@@ -71,7 +71,7 @@ namespace vmcl
 			message_filters::Subscriber<sensor_msgs::Image> sub_rgb_;
 			message_filters::Subscriber<sensor_msgs::Image> sub_depth_;
 			message_filters::Subscriber<sensor_msgs::CameraInfo> sub_info_;
-			ros::Publisher pub_estimate_odometry_, pub_particles_, pub_odometry_, pub_observed_marker_;
+			ros::Publisher pub_estimate_pose_, pub_particles_, pub_odometry_, pub_observed_marker_, pub_observed_marker_img_;
 			tf2_ros::TransformBroadcaster dynamic_br_;
 
 			Particle* particle_ = nullptr;

@@ -50,10 +50,11 @@ namespace vmcl
 		sync_->registerCallback(boost::bind(&VMCLNode::imageCallback, this, _1, _2, _3));
 
 		ros::NodeHandle nhPub;
-		pub_estimate_odometry_ = nhPub.advertise<nav_msgs::Odometry>("estimate_odometry",1);
+		pub_estimate_pose_ = nhPub.advertise<geometry_msgs::PoseWithCovarianceStamped>("estimate_pose",1);
 		pub_particles_ = nhPub.advertise<geometry_msgs::PoseArray>("particles_posearray",1);
 		pub_odometry_ = nhPub.advertise<nav_msgs::Odometry>("debug/encoder_odometry",1);
 		pub_observed_marker_ = nhPub.advertise<visualization_msgs::MarkerArray>("debug/observed_marker",1);
+		pub_observed_marker_img_ = nhPub.advertise<sensor_msgs::Image>("debug/observed_marker/image", 1);
 
 		particle_ = new Particle(pnum);
 		particle_->setParticleNoiseParams(noise_params);
@@ -219,11 +220,11 @@ namespace vmcl
 			particle_->weighting(robot_world, marker_vec);
 		}
 		estimated_pose_ = particle_->getEstimatedPose();
-		nav_msgs::Odometry robot_pose_msg;
+		geometry_msgs::PoseWithCovarianceStamped robot_pose_msg;
 		robot_pose_msg.header.stamp = ros::Time::now();
 		robot_pose_msg.header.frame_id = source_frame_;
 		robot_pose_msg.pose.pose = potbot_lib::utility::get_pose(estimated_pose_);
-		pub_estimate_odometry_.publish(robot_pose_msg);
+		pub_estimate_pose_.publish(robot_pose_msg);
 
 	}
 
@@ -369,6 +370,10 @@ namespace vmcl
 			}
 		}
 
+		std_msgs::Header header;
+        header.stamp = ros::Time::now();
+        cv_bridge::CvImage cv_img_dst(header, "bgr8", img_dst);
+        pub_observed_marker_img_.publish(cv_img_dst.toImageMsg());
 		// cv::imshow("aruco marker", img_dst);
 		// cv::waitKey(1);
 		return true;
@@ -420,7 +425,7 @@ namespace vmcl
 					// estimate_odometry.child_frame_id = frame_id_camera_;
 					// estimate_odometry.header.stamp = ros::Time::now();
 					// estimate_odometry.pose.pose = potbot_lib::utility::get_pose(sensor_world);
-					// pub_estimate_odometry_.publish(estimate_odometry);
+					// pub_estimate_pose_.publish(estimate_odometry);
 
 					geometry_msgs::PoseStamped camera_pose_msg = potbot_lib::utility::get_frame_pose(*tf_buffer_, frame_id_odom_, frame_id_camera_);
 
