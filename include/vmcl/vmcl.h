@@ -74,6 +74,7 @@ namespace vmcl
 			ros::Publisher pub_estimate_pose_, pub_particles_, pub_odometry_, pub_observed_marker_, pub_observed_marker_img_;
 			tf2_ros::TransformBroadcaster dynamic_br_;
 
+			bool using_particle_filter_ = true;
 			Particle* particle_ = nullptr;
 
 			potbot_lib::filter::MoveMeanPose* pose_filter_ = nullptr;
