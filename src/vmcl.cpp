@@ -66,6 +66,8 @@ namespace vmcl
 		dynamic_reconfigure::Server<vmcl::VMCLConfig>::CallbackType cb = boost::bind(&VMCLNode::reconfigureCallback, this, _1, _2);
 		dsrv_->setCallback(cb);
 
+		tf_broadcast_thread_ = new boost::thread(boost::bind(&VMCLNode::broadcastThread, this));
+
 		ROS_INFO("vmcl initialized");
 
 	}
@@ -238,6 +240,16 @@ namespace vmcl
 			Eigen::Affine3d target_odom = toPose(encoder_odometry_.pose.pose).to_affine();
 			Eigen::Affine3d odom_world = target_world*target_odom.inverse();
 			pose_difference_ = potbot_lib::utility::get_pose(odom_world);
+		}
+	}
+
+	void VMCLNode::broadcastThread()
+	{
+		ros::Rate rate(10);
+		while (ros::ok())
+        {
+			ROS_INFO("aaa");
+			rate.sleep();
 		}
 	}
 

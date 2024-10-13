@@ -97,11 +97,15 @@ namespace vmcl
 			int move_mean_window_num_ = 10;
 			double low_pass_coefficient_ = 0.5;
 
+			boost::thread* tf_broadcast_thread_;
+
 			void reconfigureCallback(const vmcl::VMCLConfig& param, uint32_t level); 
 
 			void imageCallback(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg);
 			void odomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 			void iniposeCallback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg);
+
+			void broadcastThread();
 
 			bool getMarkerCoords(const sensor_msgs::Image::ConstPtr& rgb_msg, const sensor_msgs::Image::ConstPtr& depth_msg, const sensor_msgs::CameraInfo::ConstPtr& info_msg, std::vector<Marker>& markers);
 			Marker getMarkerTruth(int id);
