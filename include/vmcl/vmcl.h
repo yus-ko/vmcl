@@ -76,6 +76,8 @@ namespace vmcl
 
 			bool using_particle_filter_ = true;
 			Particle* particle_ = nullptr;
+			potbot_lib::Pose initial_pose_ = potbot_lib::Pose(0,0,0,0,0,0);
+			std::vector<std::vector<double>> particle_noise_params_;
 
 			potbot_lib::filter::MoveMeanPose* pose_filter_ = nullptr;
 			// potbot_lib::filter::LowPassPose* pose_filter_ = nullptr;
@@ -114,6 +116,7 @@ namespace vmcl
 			void publishMarker(const std::vector<Marker>& markers);
 
 			void fixOdomPose();
+			geometry_msgs::PoseStamped getFixedOdomPose(const geometry_msgs::PoseStamped& p1, const geometry_msgs::PoseStamped& p2);
 
 		public:
 			VMCLNode(tf2_ros::Buffer* tf);

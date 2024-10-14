@@ -21,10 +21,10 @@ namespace vmcl
 
 			double weightFunc(double x, double xhat, double sigma);
 		public:
-			Particle(int particle_num = 100);
+			Particle(int particle_num = 100, const potbot_lib::Pose& ini_pose = potbot_lib::Pose(0,0,0,0,0,0));
 			~Particle(){};
 
-			void initialize(int particle_num = 100);
+			void initialize(int particle_num = 100, const potbot_lib::Pose& ini_pose = potbot_lib::Pose(0,0,0,0,0,0));
 			void update(double linear_vel, double angular_vel);
 			void weighting(const potbot_lib::Pose& agent_pose, const std::vector<potbot_lib::Pose>& marker_poses);
 			void resampling();

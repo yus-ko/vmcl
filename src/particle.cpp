@@ -2,19 +2,20 @@
 
 namespace vmcl
 {
-	Particle::Particle(int particle_num)
+	Particle::Particle(int particle_num, const potbot_lib::Pose& ini_pose)
 	{
-		initialize(particle_num);
+		initialize(particle_num, ini_pose);
 	}
 
-	void Particle::initialize(int particle_num)
+	void Particle::initialize(int particle_num, const potbot_lib::Pose& ini_pose)
 	{
 		std::random_device seed;
 		std::mt19937 tmp(seed());
 		eng_ = tmp;
 
 		particles_.resize(particle_num);
-		particle_weight_.resize(particle_num,1.0/double(particle_num));
+		std::fill(particles_.begin(), particles_.end(), ini_pose);
+		particle_weight_.resize(particle_num, 1.0/double(particle_num));
 		breez_.resize(particle_num);
 		greed_.resize(particle_num);
 

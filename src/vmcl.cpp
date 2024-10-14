@@ -12,7 +12,6 @@ namespace vmcl
 		double m_vw=0, v_vw=0;
 		double m_wv=0, v_wv=0;
 		double m_ww=0, v_ww=0;
-		double x=0,y=0,yaw=0;
 		int pnum = 100;
 
 		pnh.getParam("norm_noise_mean_linear_linear", m_vv);
@@ -25,19 +24,19 @@ namespace vmcl
 		pnh.getParam("norm_noise_variance_angular_angular", v_ww);
 		pnh.getParam("depth_scaling", depth_scaling_);
 		pnh.getParam("frame_id_camera_link", frame_id_camera_);
-		pnh.getParam("initial_pose_x", x);
-		pnh.getParam("initial_pose_y", y);
-		pnh.getParam("initial_pose_yaw", yaw);
+		pnh.getParam("initial_pose_x", initial_pose_.position.x);
+		pnh.getParam("initial_pose_y", initial_pose_.position.y);
+		pnh.getParam("initial_pose_yaw", initial_pose_.rotation.z);
 		pnh.getParam("particle_num", pnum);
 
-		std::vector<std::vector<double>> noise_params = {
+		particle_noise_params_ = {
 			{m_vv,v_vv},	//直進で生じる道のり
 			{m_vw,v_vw},	//回転で生じる道のり
 			{m_wv,v_wv},
 			{m_ww,v_ww}
 		};
 
-		pose_difference_ = potbot_lib::utility::get_pose(x,y,0,0,0,yaw);
+		pose_difference_ = potbot_lib::utility::get_pose(initial_pose_);
 
 		//Realsensesの時(roslaunch realsense2_camera rs_camera.launch align_depth:=true)(Depth修正版なのでこっちを使うこと)
 		sub_odom_ = nh_sub_.subscribe("odom", 1, &VMCLNode::odomCallback, this);
@@ -56,8 +55,8 @@ namespace vmcl
 		pub_observed_marker_ = nhPub.advertise<visualization_msgs::MarkerArray>("debug/observed_marker",1);
 		pub_observed_marker_img_ = nhPub.advertise<sensor_msgs::Image>("debug/observed_marker/image", 1);
 
-		particle_ = new Particle(pnum);
-		particle_->setParticleNoiseParams(noise_params);
+		particle_ = new Particle(pnum, initial_pose_);
+		particle_->setParticleNoiseParams(particle_noise_params_);
 
 		pose_filter_ = new potbot_lib::filter::MoveMeanPose(move_mean_window_num_);
 		// pose_filter_ = new potbot_lib::filter::LowPassPose(move_mean_window_num_);
@@ -157,10 +156,10 @@ namespace vmcl
 				marker_robot = poseMsgToAffine(marker_robot_msg.pose);
 			}
 
-			ROS_INFO("marker_world");
-			potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_world));
-			ROS_INFO("marker_robot");
-			potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_robot));
+			// ROS_INFO("marker_world");
+			// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_world));
+			// ROS_INFO("marker_robot");
+			// potbot_lib::utility::print_pose(potbot_lib::utility::get_pose(marker_robot));
 
 			// 世界座標系ロボット（未知）
 			Eigen::Affine3d robot_world = marker_world * marker_robot.inverse();
@@ -195,12 +194,29 @@ namespace vmcl
 
 	void VMCLNode::odomCallback(const nav_msgs::Odometry::ConstPtr& msg)
 	{
-		encoder_odometry_ = *msg;
+		if (encoder_odometry_.header.frame_id == "")
+		{
+			encoder_odometry_ = *msg;
+			geometry_msgs::PoseStamped ini_pose_ps;
+			ini_pose_ps.header.stamp = ros::Time::now();
+			ini_pose_ps.header.frame_id = source_frame_;
+			ini_pose_ps.pose = potbot_lib::utility::get_pose(initial_pose_);
+			geometry_msgs::PoseStamped odometry_ps;
+			odometry_ps.header = encoder_odometry_.header;
+			odometry_ps.pose = encoder_odometry_.pose.pose;
+
+			pose_difference_ = getFixedOdomPose(ini_pose_ps, odometry_ps).pose;
+		}
+		else
+		{
+			encoder_odometry_ = *msg;
+		}
+		
 		frame_id_odom_ = encoder_odometry_.header.frame_id;
 		frame_id_robot_ = encoder_odometry_.child_frame_id;
 		encoder_odometry_.header.stamp = ros::Time::now();
 
-		potbot_lib::utility::broadcast_frame(dynamic_br_, source_frame_, frame_id_odom_, pose_difference_);
+		// potbot_lib::utility::broadcast_frame(dynamic_br_, source_frame_, frame_id_odom_, pose_difference_);
 
 		// pub_odometry_.publish(encoder_odometry_);
 
@@ -257,21 +273,29 @@ namespace vmcl
 	{
 		if (msg->header.frame_id == source_frame_)
 		{
-			// Rw=RoOw
-			// Ow=RwRo^-1
-			Eigen::Affine3d target_world = toPose(msg->pose.pose).to_affine();
-			Eigen::Affine3d target_odom = toPose(encoder_odometry_.pose.pose).to_affine();
-			Eigen::Affine3d odom_world = target_world*target_odom.inverse();
-			pose_difference_ = potbot_lib::utility::get_pose(odom_world);
+			potbot_lib::Pose ini_pose = toPose(msg->pose.pose);
+			int pnum = particle_->getParticles().size();
+			particle_->initialize(pnum, ini_pose);
+			particle_->setParticleNoiseParams(particle_noise_params_);
+			
+			geometry_msgs::PoseStamped ini_pose_ps;
+			ini_pose_ps.header = msg->header;
+			ini_pose_ps.pose = msg->pose.pose;
+			geometry_msgs::PoseStamped odometry_ps;
+			odometry_ps.header = encoder_odometry_.header;
+			odometry_ps.pose = encoder_odometry_.pose.pose;
+
+			pose_difference_ = getFixedOdomPose(ini_pose_ps, odometry_ps).pose;
 		}
 	}
 
 	void VMCLNode::broadcastThread()
 	{
-		ros::Rate rate(10);
+		ros::Rate rate(100);
 		while (ros::ok())
         {
-			ROS_INFO("aaa");
+			potbot_lib::utility::broadcast_frame(dynamic_br_, source_frame_, frame_id_odom_, pose_difference_);
+			ros::spinOnce();
 			rate.sleep();
 		}
 	}
@@ -475,6 +499,23 @@ namespace vmcl
 				}
 			}
 		}
+	}
+
+	geometry_msgs::PoseStamped VMCLNode::getFixedOdomPose(const geometry_msgs::PoseStamped& p1, const geometry_msgs::PoseStamped& p2)
+	{
+		geometry_msgs::PoseStamped ps;
+		if (p1.header.frame_id == source_frame_ && p2.header.frame_id == frame_id_odom_)
+		{
+			// Rw=RoOw
+			// Ow=RwRo^-1
+			Eigen::Affine3d target_world = toPose(p1.pose).to_affine();
+			Eigen::Affine3d target_odom = toPose(p2.pose).to_affine();
+			Eigen::Affine3d odom_world = target_world*target_odom.inverse();
+			ps.header.stamp = ros::Time::now();
+			ps.header.frame_id = source_frame_;
+			ps.pose = potbot_lib::utility::get_pose(odom_world);
+		}
+		return ps;
 	}
 
 	void VMCLNode::publishMarker(const std::vector<Marker>& markers)
