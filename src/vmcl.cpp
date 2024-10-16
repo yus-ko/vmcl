@@ -142,7 +142,11 @@ namespace vmcl
 
 			auto marker_truth = getMarkerTruth(marker_no_pose.id);
 
-			marker_no_pose.pose.rotation = potbot_lib::Point(0,0,M_PI);
+			// marker_no_pose.pose.rotation = potbot_lib::Point(0,0,M_PI);
+
+			// marker_no_pose.pose.position.z = 0;
+			marker_no_pose.pose.rotation.x = 0;
+			marker_no_pose.pose.rotation.y = 0;
 
 			// 世界座標系マーカー（既知）
 			Eigen::Affine3d marker_world = marker_truth.pose.to_affine();
@@ -392,6 +396,7 @@ namespace vmcl
 				cv::circle(img_dst, cv::Point(mcx,mcy), 3, cv::Scalar(0,255,0),  -1, cv::LINE_AA);//緑点
 				cv::aruco::drawAxis(img_dst, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);//マーカーの姿勢描写
 				// ROS_INFO_STREAM("r"<<rvecs[i]/M_PI*180);
+				// ROS_INFO_STREAM("r"<<rvecs[i]);
 				// ROS_INFO_STREAM("t"<<tvecs[i]);
 
 				//画像→カメラ座標変換(マーカーの中心座標を使用)
@@ -417,9 +422,14 @@ namespace vmcl
 					// m.pose.rotation.x = rvecs[i][0]+debug_eular_.x;
 					// m.pose.rotation.y = rvecs[i][1]+debug_eular_.y;
 					// m.pose.rotation.z = rvecs[i][2]+debug_eular_.z;
+
 					m.pose.rotation.x = rvecs[i][0]-M_PI_2;
 					m.pose.rotation.y = rvecs[i][1]+M_PI_2;
 					m.pose.rotation.z = rvecs[i][2];
+
+					// m.pose.rotation.x = rvecs[i][0];
+					// m.pose.rotation.y = rvecs[i][1];
+					// m.pose.rotation.z = rvecs[i][2];
 
 					markers.push_back(m);
 
