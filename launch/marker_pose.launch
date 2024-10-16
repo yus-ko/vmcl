@@ -1,0 +1,14 @@
+<launch>
+
+   <node pkg="vmcl" name="marker_pose" type="marker_pose" output="screen">
+      <remap from="color/image_raw"    to="/robot_6/camera/color/image_raw"/>
+      <remap from="depth/image_raw"    to="/robot_6/camera/depth/image_rect_raw"/>
+      <remap from="color/camera_info"  to="/robot_6/camera/color/camera_info"/>
+      <param name="depth_scaling"      value="1000"/>
+   </node>
+
+   <!-- <group if="$(arg use_rviz)">
+      <node pkg="rviz" type="rviz" name="rviz_vmcl" required="true" args="-d $(arg file_rviz)"/>
+   </group> -->
+
+</launch>

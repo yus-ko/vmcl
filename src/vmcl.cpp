@@ -423,13 +423,29 @@ namespace vmcl
 					// m.pose.rotation.y = rvecs[i][1]+debug_eular_.y;
 					// m.pose.rotation.z = rvecs[i][2]+debug_eular_.z;
 
-					m.pose.rotation.x = rvecs[i][0]-M_PI_2;
-					m.pose.rotation.y = rvecs[i][1]+M_PI_2;
-					m.pose.rotation.z = rvecs[i][2];
+					// m.pose.rotation.x = rvecs[i][0]-M_PI_2;
+					// m.pose.rotation.y = rvecs[i][1]+M_PI_2;
+					// m.pose.rotation.z = rvecs[i][2];
 
 					// m.pose.rotation.x = rvecs[i][0];
 					// m.pose.rotation.y = rvecs[i][1];
 					// m.pose.rotation.z = rvecs[i][2];
+
+					cv::Mat rotation_matrix;
+					cv::Rodrigues(rvecs[i], rotation_matrix);
+					tf2::Matrix3x3 tf_rotation(
+						rotation_matrix.at<double>(0,0), rotation_matrix.at<double>(0,1), rotation_matrix.at<double>(0,2),
+						rotation_matrix.at<double>(1,0), rotation_matrix.at<double>(1,1), rotation_matrix.at<double>(1,2),
+						rotation_matrix.at<double>(2,0), rotation_matrix.at<double>(2,1), rotation_matrix.at<double>(2,2)
+					);
+					tf2::Quaternion tf_quat;
+					tf_rotation.getRotation(tf_quat);
+					geometry_msgs::Quaternion orientation;
+					orientation.x = tf_quat.x();
+					orientation.y = tf_quat.y();
+					orientation.z = tf_quat.z();
+					orientation.w = tf_quat.w();
+					potbot_lib::utility::get_rpy(orientation, m.pose.rotation.x, m.pose.rotation.y, m.pose.rotation.z);
 
 					markers.push_back(m);
 
@@ -542,9 +558,9 @@ namespace vmcl
 			marker_msg.pose = potbot_lib::utility::get_pose(m.pose);
 			// potbot_lib::utility::print_pose(marker_msg.pose);
 			marker_msg.type = visualization_msgs::Marker::CUBE;
-			marker_msg.scale.x = 0.025;
+			marker_msg.scale.x = 0.25;
 			marker_msg.scale.y = 0.25;
-			marker_msg.scale.z = 0.25;
+			marker_msg.scale.z = 0.025;
 			marker_msg.color = potbot_lib::color::get_msg(marker_msg.id);
 
 			visualization_msgs::Marker marker_axes = marker_msg;

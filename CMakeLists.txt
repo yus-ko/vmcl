@@ -66,4 +66,7 @@ target_link_libraries(marker_broadcaster ${catkin_LIBRARIES})
 add_executable(sensor_filter src/sensor_filter.cpp)
 target_link_libraries(sensor_filter ${catkin_LIBRARIES})
 
+add_executable(marker_pose src/marker_pose.cpp)
+target_link_libraries(marker_pose ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+
 add_definitions(-std=c++14)
