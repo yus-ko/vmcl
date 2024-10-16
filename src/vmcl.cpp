@@ -145,8 +145,8 @@ namespace vmcl
 			// marker_no_pose.pose.rotation = potbot_lib::Point(0,0,M_PI);
 
 			// marker_no_pose.pose.position.z = 0;
-			marker_no_pose.pose.rotation.x = 0;
-			marker_no_pose.pose.rotation.y = 0;
+			// marker_no_pose.pose.rotation.x = 0;
+			// marker_no_pose.pose.rotation.y = 0;
 
 			// 世界座標系マーカー（既知）
 			Eigen::Affine3d marker_world = marker_truth.pose.to_affine();
@@ -446,6 +446,11 @@ namespace vmcl
 					orientation.z = tf_quat.z();
 					orientation.w = tf_quat.w();
 					potbot_lib::utility::get_rpy(orientation, m.pose.rotation.x, m.pose.rotation.y, m.pose.rotation.z);
+
+					// potbot_lib::utility::print_pose(m.pose);
+
+					// m.pose.rotation.y += M_PI_2;
+					// m.pose.rotation.z += M_PI_2;
 
 					markers.push_back(m);
 
