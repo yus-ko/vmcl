@@ -94,6 +94,7 @@ namespace vmcl
 			nav_msgs::Odometry encoder_odometry_;
 			std::vector<Marker> observed_markers_;
 			potbot_lib::Pose estimated_pose_;
+			bool recieved_odom_topic_ = false;
 
 			dynamic_reconfigure::Server<vmcl::VMCLConfig> *dsrv_;
 			potbot_lib::Point debug_eular_;

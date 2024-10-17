@@ -27,6 +27,7 @@
 
       <param name="frame_id_camera_link"                 value="$(arg frame_id_camera_link)"/>
 
+      <param name="using_particle_filter"                value="false"/>
       <param name="norm_noise_mean_linear_linear"        value="0.0"/>
       <param name="norm_noise_variance_linear_linear"    value="0.001"/>
       <param name="norm_noise_mean_linear_angular"       value="0.0"/>
